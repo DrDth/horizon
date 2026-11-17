@@ -2149,6 +2149,25 @@ mod tests {
     use crate::banner::BannerLayer;
     use std::fs;
 
+    /// A recipe type without a namespace is vanilla's, as `Identifier.parse` reads it:
+    /// `crafting_shapeless` is `minecraft:crafting_shapeless`.
+    #[test]
+    fn a_recipe_type_without_a_namespace_is_vanillas() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("data/minecraft/recipe");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(
+            folder.join("bare.json"),
+            r#"{"type":"crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:stick","count":3}}"#,
+        )
+        .unwrap();
+        let items = Items::for_tests(Default::default());
+        let load = crate::test_resources::server_load();
+        let recipes = Recipes::load(root.path(), &items, &PackOverlay::NONE, &load).unwrap();
+        assert_eq!(recipes.crafting.len(), 1);
+        assert_eq!(recipes.by_type["minecraft:crafting"][0].id, "minecraft:bare");
+    }
+
     /// ItemStackTemplate.apply applies the result patch after the input patch.
     #[test]
     fn transmute_result_patch_preserves_inheritance_and_explicit_removals() {

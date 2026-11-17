@@ -74,6 +74,13 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
                 continue;
             }
         };
+        // A type without a namespace is vanilla's: `Identifier.parse` reads
+        // `crafting_shaped` as `minecraft:crafting_shaped`.
+        if let Some(kind) = v["type"].as_str()
+            && !kind.contains(':')
+        {
+            v["type"] = Value::String(format!("minecraft:{kind}"));
+        }
         // A file whose load conditions don't hold is silently absent.
         if !conditions.allows_id(&v, "recipe", &qualified(&name)) {
             continue;
