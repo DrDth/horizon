@@ -144,3 +144,26 @@ fn unknown_serializer_refuses_before_unclaimed_ingredient_is_dropped() {
         );
     });
 }
+
+/// A content mod's recipe of its own type, with no installed mod to register the serializer,
+/// is left out and the rest load. Vanilla's namespace and code mods' stay fatal (above).
+#[test]
+fn content_recipe_of_an_unclaimed_type_is_left_out() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let press: Value = serde_json::from_str(r#"{"type":"gem:press","input":"gem:ore"}"#).unwrap();
+        let sticks: Value = serde_json::from_str(
+            r#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:stick"}}"#,
+        )
+        .unwrap();
+        let sources = vec![
+            ("gem:press_ore".to_owned(), press),
+            ("gem:sticks".to_owned(), sticks),
+        ];
+        let resolved =
+            ResolvedSources::resolve(sources, &crate::test_resources::server_load()).unwrap();
+        let names: Vec<&str> = resolved.recipes.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["gem:sticks"]);
+        assert!(!mod_kinds::unclaimed("minecraft:future", "minecraft:future_serializer"));
+        assert!(!mod_kinds::unclaimed("gem:press_ore", "minecraft:future_serializer"));
+    });
+}

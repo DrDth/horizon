@@ -20,6 +20,20 @@ fn source_path(name: &str) -> String {
     let (namespace, path) = name.split_once(':').unwrap_or(("minecraft", name));
     format!("data/{namespace}/recipe/{path}.json")
 }
+/// Whether a recipe whose serializer nobody registered comes from content without code: neither
+/// its own namespace nor the serializer's is vanilla's or an installed code mod's. That is a mod
+/// carried over from Java, whose own recipe types wait for a port; the load leaves such a recipe
+/// out with a log line, as vanilla's recipe manager leaves out a file it can't decode. Every other
+/// unregistered serializer stays fatal: vanilla's own, or one a code mod should have registered.
+pub fn unclaimed(file: &str, serializer: &str) -> bool {
+    let namespace = |id: &str| id.split_once(':').map_or("minecraft", |(ns, _)| ns).to_owned();
+    let (recipe, kind) = (namespace(file), namespace(serializer));
+    let claimed = |ns: &str| {
+        ns == "minecraft" || mod_api::__private::installed_code_ids().any(|id| id == ns)
+    };
+    !claimed(&recipe) && !claimed(&kind)
+}
+
 /// Resolve the file's serializer before parsing, after source conditions have run.
 pub fn recipe_type(file: &str, serializer: &str) -> Result<String, String> {
     if super::VANILLA_RECIPE_SERIALIZERS.contains(&serializer) {

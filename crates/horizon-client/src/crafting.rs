@@ -1486,11 +1486,26 @@ impl ResolvedSources {
     ) -> Result<Self> {
         // Every consumer keeps vanilla's resource-file registration order.
         sources.sort_by_cached_key(|(name, _)| registration_key(name));
-        for (name, file) in &sources {
-            if let Some(serializer) = file["type"].as_str() {
-                mod_kinds::recipe_type(name, serializer)?;
+        let mut left_out: std::collections::BTreeMap<String, usize> = Default::default();
+        let mut kept = Vec::with_capacity(sources.len());
+        for (name, file) in sources {
+            if let Some(serializer) = file["type"].as_str()
+                && let Err(error) = mod_kinds::recipe_type(&name, serializer)
+            {
+                if !mod_kinds::unclaimed(&name, serializer) {
+                    return Err(error.into());
+                }
+                *left_out.entry(serializer.to_owned()).or_default() += 1;
+                continue;
             }
+            kept.push((name, file));
         }
+        for (serializer, count) in &left_out {
+            log::error!(
+                "recipes: {count} recipe(s) of {serializer} left out: no installed mod registers the serializer"
+            );
+        }
+        let sources = kept;
         let listened = mod_api::__private::listened(mod_api::HookId::Ingredient);
         let recipes = sources
             .into_iter()
