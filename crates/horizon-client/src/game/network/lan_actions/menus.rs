@@ -568,10 +568,14 @@ impl Game<'_> {
         let menus = host.menus.get(&conn);
         menus
             .and_then(|m| m.crafting.table.as_ref())
-            .is_none_or(|t| self.lan_table_valid(g, t.3))
-            && menus
-                .and_then(|m| m.station.as_ref())
-                .is_none_or(|s| self.lan_station_valid(g, s))
+            .is_none_or(|t| {
+                self.portable_station_valid(g, t.0)
+                    .unwrap_or_else(|| self.lan_table_valid(g, t.3))
+            })
+            && menus.and_then(|m| m.station.as_ref()).is_none_or(|s| {
+                self.portable_station_valid(g, s.window)
+                    .unwrap_or_else(|| self.lan_station_valid(g, s))
+            })
             && p.lectern
                 .as_ref()
                 .is_none_or(|l| self.lan_lectern_valid(g, l.key))
