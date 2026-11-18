@@ -99,6 +99,10 @@ pub struct Report {
     pub loot_tables_upgraded: usize,
     /// Advancements whose criteria were rewritten ([`upgrade_advancement`]).
     pub advancements_upgraded: usize,
+    /// Damage types whose death message type was one a mod added to
+    /// NeoForge's enum in Java, set to vanilla's `default`, by that type.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub death_messages_defaulted: BTreeMap<String, usize>,
     /// Predicate files rewritten in 26.3's shape ([`upgrade_predicate`]).
     pub predicates_upgraded: usize,
     /// Blocks whose jar has no loot table but drop themselves in the oracle:
@@ -459,6 +463,18 @@ pub fn upgrade_advancement(v: &mut Value) -> bool {
         }
     }
     changed
+}
+
+/// Vanilla's death message types (`DeathMessageType`).
+const DEATH_MESSAGES: [&str; 3] = ["default", "fall_variants", "intentional_game_design"];
+
+/// A damage type's death message type when it isn't vanilla's: NeoForge lets
+/// a mod extend the enum in Java (Productive Metalworks'
+/// `productivemetalworks:foundry`), and 26.3 refuses the damage type, which
+/// stops the world.
+fn java_death_message(damage: &Value) -> Option<String> {
+    let kind = damage.get("death_message_type")?.as_str()?;
+    (!DEATH_MESSAGES.contains(&kind)).then(|| kind.to_owned())
 }
 
 /// A 1.21.1 loot table in 26.3's shape, in place: `conditions` lists become
@@ -1282,6 +1298,17 @@ pub fn carry(
                 // The biomes a modifier changes, often by the loader's tags (`#c:is_overworld`).
                 if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
                     crate::worldgen::convention_tags(&v["biomes"], &mut biome_conventions);
+                }
+            } else if rel.starts_with("damage_type/")
+                && name.starts_with("data/")
+                && name.ends_with(".json")
+            {
+                if let Ok(mut damage) = serde_json::from_slice::<Value>(&bytes)
+                    && let Some(kind) = java_death_message(&damage)
+                {
+                    *report.death_messages_defaulted.entry(kind).or_default() += 1;
+                    damage["death_message_type"] = json!("default");
+                    bytes = serde_json::to_vec_pretty(&damage).unwrap_or(bytes);
                 }
             } else if rel.starts_with("advancement/")
                 && name.starts_with("data/")
@@ -2306,6 +2333,39 @@ mod tests {
             unreadable("data/m/advancement/worn.json", &mut damaged),
             None
         );
+    }
+
+    /// A death message type a mod added in Java becomes vanilla's default;
+    /// vanilla's own stay.
+    #[test]
+    fn death_message_types_of_java_become_the_default() {
+        let dir = temp_dir("death-messages");
+        let jar = dir.join("damage.jar");
+        write_jar(
+            &jar,
+            &[
+                (
+                    "data/example/damage_type/melt.json",
+                    br#"{"message_id": "example.melt", "scaling": "never", "exhaustion": 0.1,
+                        "death_message_type": "example:melt"}"#,
+                ),
+                (
+                    "data/example/damage_type/drop.json",
+                    br#"{"message_id": "example.drop", "scaling": "never", "exhaustion": 0.1,
+                        "death_message_type": "fall_variants"}"#,
+                ),
+            ],
+        );
+        let out = dir.join("out");
+        let report = carry_alone(&jar, &out).unwrap();
+        let read = |name: &str| -> Value {
+            let file = out.join(format!("carry/data/example/damage_type/{name}.json"));
+            serde_json::from_slice(&fs::read(file).unwrap()).unwrap()
+        };
+        assert_eq!(read("melt")["death_message_type"], "default");
+        assert_eq!(read("drop")["death_message_type"], "fall_variants");
+        assert_eq!(report.death_messages_defaulted["example:melt"], 1);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
