@@ -12,7 +12,8 @@ use std::{
 };
 use wgpu::util::DeviceExt;
 
-use model_reducing::{full_size_sprites, reducible_model_sprites};
+pub use model_reducing::set_mod_namespaces;
+use model_reducing::{full_size_sprites, mod_namespaces, reducible_model_sprites};
 
 mod animate;
 pub mod cit_glint;
@@ -1449,6 +1450,7 @@ impl HudAtlas {
                                 &mut images,
                                 &mut gui_sizes,
                                 &keep,
+                                &mod_namespaces(),
                                 MAX_ATLAS_SIZE,
                             )?;
                             log::warn!(
@@ -4732,10 +4734,12 @@ texture=wide",
             ("big:gui/slot".into(), 128, 128, Vec::new()),
         ];
         let keep = HashSet::from(["big:font/glyphs".to_owned()]);
+        let mods = HashSet::from(["big".to_owned()]);
         let mut sizes = HashMap::new();
         assert!(HudAtlas::layout(&images, 1024).is_err());
         let (width, placements, free) =
-            HudAtlas::layout_capping_mod_textures(&mut images, &mut sizes, &keep, 1024).unwrap();
+            HudAtlas::layout_capping_mod_textures(&mut images, &mut sizes, &keep, &mods, 1024)
+                .unwrap();
         assert_inside(&images, width, &placements, free);
         let find = |name: &str| images.iter().find(|i| i.0 == name).unwrap().clone();
         let book = find("big:gui/book");
@@ -4755,7 +4759,8 @@ texture=wide",
             assert_eq!((image.1, image.2), (w, h), "{name}");
         }
     }
-    /// The last cap tried is 16 texels, also when halving would pass below it.
+    /// The last cap tried is 16 texels, also when halving would pass below it;
+    /// a namespace no mod owns is never capped.
     #[test]
     fn mod_textures_are_capped_down_to_16_texels() {
         let mut images = vec![
@@ -4769,8 +4774,15 @@ texture=wide",
         ];
         assert!(HudAtlas::layout(&images, 1024).is_err());
         let mut sizes = HashMap::new();
-        HudAtlas::layout_capping_mod_textures(&mut images, &mut sizes, &HashSet::new(), 1024)
-            .unwrap();
+        // `m` is no mod's (a resource pack's own namespace): its texture stays whole.
+        let none = HashSet::new();
+        assert!(
+            HudAtlas::layout_capping_mod_textures(&mut images, &mut sizes, &none, &none, 1024)
+                .is_err()
+        );
+        assert!(sizes.is_empty());
+        let mods = HashSet::from(["m".to_owned()]);
+        HudAtlas::layout_capping_mod_textures(&mut images, &mut sizes, &none, &mods, 1024).unwrap();
         let dot = images.iter().find(|i| i.0 == "m:gui/dot").unwrap();
         assert_eq!((dot.1, dot.2), (16, 16));
         assert_eq!(sizes["m:gui/dot"], (31, 31));

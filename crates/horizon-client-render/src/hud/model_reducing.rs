@@ -3,6 +3,25 @@ use super::{
     HashMap, HashSet, HudAtlas, PackedImage, ResourceSource, Result, bitmap_font_textures,
 };
 
+/// The asset namespaces the mods that are on own: only their HUD textures may
+/// lose resolution, so a game without mods draws its resource packs as before.
+static MOD_NAMESPACES: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+/// Sets the namespaces the mods that are on own (the content root does, as it
+/// loads them); returns the list it replaced, for a test to put back.
+pub fn set_mod_namespaces(namespaces: Vec<String>) -> Vec<String> {
+    std::mem::replace(
+        &mut *MOD_NAMESPACES.write().unwrap_or_else(|e| e.into_inner()),
+        namespaces,
+    )
+}
+
+/// The namespaces `set_mod_namespaces` gave; none before it.
+pub(super) fn mod_namespaces() -> HashSet<String> {
+    let names = MOD_NAMESPACES.read().unwrap_or_else(|e| e.into_inner());
+    names.iter().cloned().collect()
+}
+
 /// Only model atlas sprites may lose resolution. Font sheets can also be
 /// model textures, so protect both their file names and renamed sources.
 pub(super) fn reducible_model_sprites(
@@ -120,22 +139,24 @@ impl HudAtlas {
     /// When the model textures at their smallest still don't fit (a modpack's
     /// GUI and entity textures: All the Mods 10 brings over 200 million texels
     /// of GUI alone), cap the longer side of every other texture of a mod's
-    /// namespace, halving the cap until the atlas holds them: the largest lose
-    /// resolution first and keep their logical GUI size, as the models do.
-    /// Vanilla's textures, Horizon's, `keep` (font sheets, blurred sprites) and
-    /// run-time slots stay as they are, and below 16 texels nothing shrinks.
+    /// namespace (`mods`), halving the cap until the atlas holds them: the
+    /// largest lose resolution first and keep their logical GUI size, as the
+    /// models do. Vanilla's textures, Horizon's, a resource pack's own
+    /// namespaces, `keep` (font sheets, blurred sprites) and run-time slots stay
+    /// as they are, and below 16 texels nothing shrinks.
     pub(super) fn layout_capping_mod_textures(
         images: &mut [PackedImage],
         gui_sizes: &mut HashMap<String, (u32, u32)>,
         keep: &HashSet<String>,
+        mods: &HashSet<String>,
         max: u32,
     ) -> Result<(u32, Vec<(u32, u32)>, u32)> {
         let capped = |name: &str, pixels: &[u8]| {
             !pixels.is_empty()
                 && !keep.contains(name)
-                && name
-                    .split_once(':')
-                    .is_some_and(|(ns, _)| ns != "minecraft" && ns != "horizon")
+                && name.split_once(':').is_some_and(|(ns, _)| {
+                    ns != "minecraft" && ns != "horizon" && mods.contains(ns)
+                })
         };
         let mut cap = images
             .iter()
