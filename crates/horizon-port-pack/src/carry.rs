@@ -1139,7 +1139,9 @@ pub fn carry(
         }
         let dest = if keep {
             report.copied += 1;
-            inside.join(&name)
+            // Carvers and configured features under 26.3's folder names: the
+            // game reads a mod's worldgen there only.
+            inside.join(crate::worldgen::renamed_in_26_3(&name).unwrap_or_else(|| name.clone()))
         } else {
             report.outside.push(name.clone());
             outside.join(&name)
@@ -2216,6 +2218,63 @@ mod tests {
         };
         assert_eq!(tag("item"), current);
         assert_eq!(tag("items"), stale);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A 1.21.1 mod's carvers and configured features land in 26.3's folders
+    /// (`worldgen/carver`, `worldgen/feature`), the only ones the game reads,
+    /// with `config` unwrapped; its biomes name their carvers as a list, as
+    /// 26.3's codec reads them.
+    #[test]
+    fn worldgen_is_carried_in_26_3_folders_and_shape() {
+        let dir = temp_dir("worldgen");
+        let jar = dir.join("worldgen.jar");
+        write_jar(
+            &jar,
+            &[
+                (
+                    "data/example/worldgen/configured_carver/deep.json",
+                    br##"{"type": "minecraft:canyon", "config": {"probability": 0.02,
+                        "y": {"absolute": 20}, "yScale": 3.0,
+                        "replaceable": "#minecraft:overworld_carver_replaceables",
+                        "lava_level": {"above_bottom": 8},
+                        "vertical_rotation": 0.0, "shape": {"thickness": 2.0}}}"##,
+                ),
+                (
+                    "data/example/worldgen/configured_feature/ore.json",
+                    br#"{"type": "minecraft:ore", "config": {"size": 5,
+                        "discard_chance_on_air_exposure": 0.0, "targets": []}}"#,
+                ),
+                (
+                    "data/example/worldgen/biome/glade.json",
+                    br#"{"has_precipitation": true, "temperature": 0.7, "downfall": 0.8,
+                        "effects": {"water_color": 4159204}, "features": [],
+                        "carvers": {"air": ["example:deep"]},
+                        "spawners": {"monster": []}, "spawn_costs": {}}"#,
+                ),
+            ],
+        );
+        let out = dir.join("out");
+        carry_alone(&jar, &out).unwrap();
+        let worldgen = out.join("carry/data/example/worldgen");
+        let read = |file: &str| -> Value {
+            serde_json::from_slice(&fs::read(worldgen.join(file)).unwrap()).unwrap()
+        };
+        assert_eq!(
+            read("carver/deep.json"),
+            json!({"type": "minecraft:canyon", "probability": 0.02, "y": {"absolute": 20},
+                "vertical_rotation": 0.0, "shape": {"thickness": 2.0, "y_scale": 3.0}})
+        );
+        assert_eq!(
+            read("feature/ore.json"),
+            json!({"type": "minecraft:ore", "size": 5,
+                "discard_chance_on_air_exposure": 0.0, "targets": []})
+        );
+        let biome = read("biome/glade.json");
+        assert_eq!(biome["carvers"], json!(["example:deep"]));
+        assert_eq!(biome.get("spawners"), None);
+        assert!(!worldgen.join("configured_carver").exists());
+        assert!(!worldgen.join("configured_feature").exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 

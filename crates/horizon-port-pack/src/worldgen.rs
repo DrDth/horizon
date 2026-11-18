@@ -157,6 +157,24 @@ pub struct Upgrade {
 /// `data/<id>/worldgen/<kind>/horizon_added/<name>.json`.
 pub const ADDED: &str = "horizon_added";
 
+/// Worldgen folders 26.3 renamed (before and after); the game reads a mod's
+/// carvers and configured features only under the new names.
+const RENAMED_IN_26_3: [(&str, &str); 2] = [
+    ("configured_carver", "carver"),
+    ("configured_feature", "feature"),
+];
+
+/// `data/<ns>/worldgen/<folder>/<file>` under 26.3's folder name, for a
+/// folder it renamed ([`RENAMED_IN_26_3`]).
+pub fn renamed_in_26_3(name: &str) -> Option<String> {
+    let (ns, rest) = name.strip_prefix("data/")?.split_once('/')?;
+    let rest = rest.strip_prefix("worldgen/")?;
+    RENAMED_IN_26_3.iter().find_map(|(before, after)| {
+        let file = rest.strip_prefix(before)?.strip_prefix('/')?;
+        Some(format!("data/{ns}/worldgen/{after}/{file}"))
+    })
+}
+
 /// Rewrites one `data/<ns>/worldgen/<kind>/...` file in place; whether it
 /// changed.
 /// `set_tags` are the mod's structure set tags, expanded
@@ -177,17 +195,27 @@ pub fn upgrade(
     upgrade_types(kind, v, report, set_tags) || states || features || dropped || renamed
 }
 
-/// A 1.21.1 configured or placed feature in 26.3's form, as world packs get
-/// it ([`crate::upgrade`]): `config` unwrapped (26.3 skips a feature that
-/// keeps it), patches and placements rewritten. Whether it changed.
+/// A 1.21.1 configured or placed feature, configured carver or biome in
+/// 26.3's form, as world packs get it ([`crate::upgrade`]): `config`
+/// unwrapped (26.3 skips a feature or carver that keeps it), patches and
+/// placements rewritten, a biome's carvers a list and its spawns and effects
+/// attributes (26.3 refuses the old biome, and with it every biome of the
+/// load). Whether it changed.
 fn features(kind: &str, v: &mut Value, report: &mut Upgrade) -> bool {
     let mut r = crate::upgrade::Report::default();
     let new = match kind {
-        // Every 1.21.1 configured feature has `config`; one without is 26.3's.
+        // Every 1.21.1 configured feature and carver has `config`; one without is 26.3's.
         "configured_feature" if v.get("config").is_some() => {
             crate::upgrade::features::feature(v, &mut r)
         }
+        "configured_carver" if v.get("config").is_some() => {
+            crate::upgrade::registries::carver(v, &mut r)
+        }
         "placed_feature" => crate::upgrade::features::placed(v, &mut r),
+        // 26.3's biome has neither `spawners` nor carvers by step.
+        "biome" if v.get("spawners").is_some() || v["carvers"].is_object() => {
+            crate::upgrade::registries::biome(v, &mut r)
+        }
         _ => return false,
     };
     for (t, n) in r.unknown {
