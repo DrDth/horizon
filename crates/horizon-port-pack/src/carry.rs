@@ -99,9 +99,10 @@ pub struct Report {
     pub loot_tables_upgraded: usize,
     /// Advancements whose criteria were rewritten ([`upgrade_advancement`]).
     pub advancements_upgraded: usize,
-    /// Damage types whose death message type or effects were one a mod
-    /// added to NeoForge's enum in Java, set to vanilla's default
-    /// ([`java_damage_values`]), by `<field> <value>`.
+    /// Damage types' death message types and effects that are not vanilla's
+    /// (a mod's own, added to NeoForge's enum in Java, or a misspelt one),
+    /// set to vanilla's default ([`java_damage_values`]): how often each
+    /// `<field> <original value>` was replaced.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub damage_types_defaulted: BTreeMap<String, usize>,
     /// Predicate files rewritten in 26.3's shape ([`upgrade_predicate`]).
