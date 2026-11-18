@@ -511,17 +511,22 @@ impl Sprites {
         let mut namespaces: Vec<_> = by_namespace.into_iter().collect();
         namespaces.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(b.0)));
         let mut given_up = Vec::new();
+        // Each name keeps a layer, the missing texture's: geometry that finds its sprites by
+        // name (`sprite_layers`, a native mod's section geometry) draws the checkerboard
+        // instead of leaving the face out.
+        let missing = self.overflow_layer();
         for (ns, names) in namespaces {
             if over == 0 {
                 break;
             }
             let take = names.len().min(over);
-            self.dropped
-                .extend(names.iter().rev().take(take).map(|n| (*n).to_owned()));
+            for name in names.iter().rev().take(take) {
+                self.dropped.insert((*name).to_owned());
+                self.layers.insert((*name).to_owned(), missing);
+            }
             over -= take;
             given_up.push(format!("{ns} ({take})"));
         }
-        self.overflow_layer();
         log::warn!(
             "Horizon: block textures past the {} layers the renderer draws from; \
              the missing texture stands in for {}",
@@ -1072,7 +1077,8 @@ mod tests {
     use super::*;
 
     /// Past the arrays' layers, the namespaces with the most new textures give theirs up
-    /// first and share the missing texture; vanilla's are never given up.
+    /// first and share the missing texture, under their own names; vanilla's are never
+    /// given up.
     #[test]
     fn textures_past_the_layers_give_way_by_namespace() {
         let mut sprites = Sprites::default();
@@ -1093,6 +1099,9 @@ mod tests {
         let missing = sprites.insert("big:block/c").unwrap();
         assert_eq!(sprites.insert("big:block/b").unwrap(), missing);
         assert_eq!(sprites.count(), 1);
+        // Found by name too, as geometry that never inserts looks them up.
+        assert_eq!(sprites.layers.get("big:block/b"), Some(&missing));
+        assert_eq!(sprites.layers.get("big:block/a"), None);
         // A load that fits gives nothing up.
         let mut fits = Sprites::default();
         fits.plan_within(names, 5);
