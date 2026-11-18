@@ -190,12 +190,26 @@ pub(crate) fn describe_adapter(adapter: &wgpu::Adapter) {
 /// in one array.
 pub(crate) fn check_layers(adapter: &wgpu::Adapter, layers: u32) -> Result<u32> {
     let info = adapter.get_info();
-    Ok(layer_split(
-        adapter.limits().max_texture_array_layers,
-        info.backend == wgpu::Backend::Gl,
-        adapter_requested_split(&info, requested_split(), layers),
-        layers,
-    )?)
+    let limits = adapter.limits();
+    let split = |arrays| {
+        super::layer_split_in(
+            limits.max_texture_array_layers,
+            info.backend == wgpu::Backend::Gl,
+            adapter_requested_split(&info, requested_split(), layers),
+            layers,
+            arrays,
+        )
+    };
+    // A pack past the arrays terrain.wgsl binds takes more, where the GPU samples enough.
+    let (arrays, split) = match split(super::SPRITE_ARRAYS) {
+        Ok(s) => (super::SPRITE_ARRAYS, s),
+        Err(_) if limits.max_sampled_textures_per_shader_stage >= super::MORE_ARRAYS_TEXTURES => {
+            (super::MORE_SPRITE_ARRAYS, split(super::MORE_SPRITE_ARRAYS)?)
+        }
+        Err(e) => return Err(e.into()),
+    };
+    super::set_bound_sprite_arrays(arrays);
+    Ok(split)
 }
 /// Whether the swapchain can take a window of `width` x `height`: each side from 1 to the
 /// device's `max_texture_dimension_2d` (`max`), else `Surface::configure` panics. 0 is a

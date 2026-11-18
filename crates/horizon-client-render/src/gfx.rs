@@ -44,7 +44,40 @@ fn no_pack_hdr_gain(layered: bool, pack: bool, world: bool) -> bool {
 }
 
 pub(in crate::gfx) fn terrain_shader() -> String {
-    wgsl_prefix::HDR_LIGHT.to_owned() + include_str!("terrain.wgsl")
+    let terrain = include_str!("terrain.wgsl");
+    let terrain = match bound_sprite_arrays() > SPRITE_ARRAYS {
+        true => more_sprite_arrays(terrain),
+        false => terrain.to_owned(),
+    };
+    wgsl_prefix::HDR_LIGHT.to_owned() + &terrain
+}
+
+/// terrain.wgsl with [`MORE_SPRITE_ARRAYS`] arrays: `sprites_8`... at bindings 13 and up,
+/// and the samplers' switches reaching them.
+fn more_sprite_arrays(terrain: &str) -> String {
+    let last = "@group(0) @binding(11) var sprites_7: texture_2d_array<f32>;";
+    let more: String = (SPRITE_ARRAYS..MORE_SPRITE_ARRAYS)
+        .map(|i| {
+            format!(
+                "\n@group(0) @binding({}) var sprites_{i}: texture_2d_array<f32>;",
+                MORE_ARRAYS_BINDING + i - SPRITE_ARRAYS
+            )
+        })
+        .collect();
+    let mut out = terrain.replacen(last, &format!("{last}{more}"), 1);
+    for (call, args) in [
+        ("textureSampleGrad", "sprite_sampler, uv, l, dx, dy"),
+        ("textureSampleLevel", "sprite_sampler, uv, l, lod"),
+    ] {
+        let default = format!("default: {{ return {call}(sprites_7, {args}); }}");
+        let cases: String = (SPRITE_ARRAYS - 1..MORE_SPRITE_ARRAYS - 1)
+            .map(|i| format!("case {i}u: {{ return {call}(sprites_{i}, {args}); }}\n        "))
+            .collect();
+        let last = MORE_SPRITE_ARRAYS - 1;
+        let new_default = format!("default: {{ return {call}(sprites_{last}, {args}); }}");
+        out = out.replacen(&default, &format!("{cases}{new_default}"), 1);
+    }
+    out
 }
 
 fn border_shader() -> String {
@@ -1890,31 +1923,61 @@ fn adapter_requested_split(info: &wgpu::AdapterInfo, asked: Option<u32>, n: u32)
 pub(crate) fn sprite_split() -> u32 {
     requested_split().unwrap_or(SPRITE_SPLIT)
 }
-/// The block sprite layers per texture array on an adapter that holds
-/// `max_layers` layers per array: [`SPRITE_SPLIT`], `requested`
-/// (`HORIZON_SPRITE_SPLIT`) or `max_layers`, whichever is smallest, with a full
-/// array still fitting once [`array_layers`] pads it for OpenGL. Errors when
-/// `layers` sprites need more than the [`SPRITE_ARRAYS`] arrays terrain.wgsl binds.
+/// [`layer_split_in`] for terrain.wgsl's first [`SPRITE_ARRAYS`] arrays.
+#[cfg(test)]
 fn layer_split(
     max_layers: u32,
     gl: bool,
     requested: Option<u32>,
     layers: u32,
 ) -> std::result::Result<u32, String> {
+    layer_split_in(max_layers, gl, requested, layers, SPRITE_ARRAYS)
+}
+/// The block sprite layers per texture array on an adapter that holds
+/// `max_layers` layers per array: [`SPRITE_SPLIT`], `requested`
+/// (`HORIZON_SPRITE_SPLIT`) or `max_layers`, whichever is smallest, with a full
+/// array still fitting once [`array_layers`] pads it for OpenGL. Errors when
+/// `layers` sprites need more than `arrays` arrays.
+fn layer_split_in(
+    max_layers: u32,
+    gl: bool,
+    requested: Option<u32>,
+    layers: u32,
+    arrays: u32,
+) -> std::result::Result<u32, String> {
     let mut split = requested.unwrap_or(SPRITE_SPLIT).min(max_layers).max(1);
     if split > 1 && array_layers(split, gl) > max_layers {
         split -= 1;
     }
-    if layers > split * SPRITE_ARRAYS {
+    if layers > split * arrays {
         return Err(format!(
             "GPU supports {max_layers} texture layers per array; {layers} block textures need \
-             more than the {SPRITE_ARRAYS} arrays of {split} Horizon draws from"
+             more than the {arrays} arrays of {split} Horizon draws from"
         ));
     }
     Ok(split)
 }
 /// Sprite arrays terrain.wgsl binds (`sprites`, `sprites_1`...).
 pub(crate) const SPRITE_ARRAYS: u32 = 8;
+/// The arrays it binds instead when a pack's block textures need more than
+/// [`SPRITE_ARRAYS`] and the GPU samples enough textures per stage
+/// ([`MORE_ARRAYS_TEXTURES`]): `sprites_8`... at bindings from [`MORE_ARRAYS_BINDING`].
+/// Shader packs and native mods' draws still see the first [`SPRITE_ARRAYS`].
+pub(crate) const MORE_SPRITE_ARRAYS: u32 = 16;
+/// The binding of `sprites_8`, past group 0's others.
+const MORE_ARRAYS_BINDING: u32 = 13;
+/// Sampled textures per shader stage a GPU needs for [`MORE_SPRITE_ARRAYS`].
+const MORE_ARRAYS_TEXTURES: u32 = 32;
+/// The arrays terrain.wgsl binds on this device: [`SPRITE_ARRAYS`], or
+/// [`MORE_SPRITE_ARRAYS`] once [`device::check_layers`] found a pack that needs them.
+static BOUND_SPRITE_ARRAYS: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(SPRITE_ARRAYS);
+pub(crate) fn bound_sprite_arrays() -> u32 {
+    BOUND_SPRITE_ARRAYS.load(std::sync::atomic::Ordering::Relaxed)
+}
+fn set_bound_sprite_arrays(arrays: u32) {
+    BOUND_SPRITE_ARRAYS.store(arrays, std::sync::atomic::Ordering::Relaxed);
+}
 /// The layers to give a square texture of `count` layers viewed as a 2D
 /// array. wgpu's OpenGL backend picks a texture's target from its layer
 /// count when it is created: one layer makes a 2D texture and a multiple of
@@ -1934,7 +1997,7 @@ fn sprite_views(
     unused: &wgpu::TextureView,
     mips: Option<u32>,
 ) -> Vec<wgpu::TextureView> {
-    (0..SPRITE_ARRAYS as usize)
+    (0..bound_sprite_arrays() as usize)
         .map(|i| match textures.get(i) {
             Some(t) => t.create_view(&wgpu::TextureViewDescriptor {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -2023,7 +2086,16 @@ fn terrain_group(
             view(10, &sprites[6]),
             view(11, &sprites[7]),
             view(12, emission_thresholds),
-        ],
+        ]
+        .into_iter()
+        .chain(
+            sprites
+                .iter()
+                .enumerate()
+                .skip(SPRITE_ARRAYS as usize)
+                .map(|(i, s)| view(MORE_ARRAYS_BINDING + i as u32 - SPRITE_ARRAYS, s)),
+        )
+        .collect::<Vec<_>>(),
     })
 }
 /// CPU texture uploads prepared by the resource worker. Consumed by renderer
@@ -6188,9 +6260,12 @@ impl Renderer {
     /// masks. Only with HDR output on: nothing else reads them.
     pub fn measure_emission(&mut self) {
         if let Some(hdr) = &self.hdr {
+            // The thresholds pass binds the first arrays only; past them the texels stay 0
+            // and every pixel of a light source may shine, as with HDR off.
             let views = sprite_views(&self.sprite_textures, &self.sprite_unused, None);
+            let first = &views[..SPRITE_ARRAYS as usize];
             self.emission_stats
-                .measure(&self.device, &self.queue, &views, hdr.masks);
+                .measure(&self.device, &self.queue, first, hdr.masks);
         }
     }
     /// The share of real frames frame generation shows a made frame before (1 while it
@@ -12773,6 +12848,27 @@ mod tests {
             assert_eq!(super::array_layers(count, false), count);
         }
     }
+    /// For a pack past eight arrays, terrain.wgsl binds sixteen and samples each of them.
+    #[test]
+    fn terrain_binds_sixteen_sprite_arrays_for_a_pack_that_needs_them() {
+        let source =
+            wgsl_prefix::HDR_LIGHT.to_owned() + &more_sprite_arrays(include_str!("terrain.wgsl"));
+        let module = naga::front::wgsl::parse_str(&source).unwrap();
+        let arrays = module
+            .global_variables
+            .iter()
+            .filter(|(_, v)| v.name.as_deref().is_some_and(|n| n.starts_with("sprites")))
+            .count();
+        assert_eq!(arrays, MORE_SPRITE_ARRAYS as usize);
+        for call in ["textureSampleGrad", "textureSampleLevel"] {
+            assert!(source.contains(&format!("case 7u: {{ return {call}(sprites_7,")));
+            assert!(source.contains(&format!("default: {{ return {call}(sprites_15,")));
+        }
+        naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .unwrap();
+    }
+
     #[test]
     fn plain_solid_shaders_translate_for_every_backend() {
         // `SolidPipeline::plain` builds terrain.wgsl's solid entries with `HDR_LIGHTING`
