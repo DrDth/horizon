@@ -4755,6 +4755,26 @@ texture=wide",
             assert_eq!((image.1, image.2), (w, h), "{name}");
         }
     }
+    /// The last cap tried is 16 texels, also when halving would pass below it.
+    #[test]
+    fn mod_textures_are_capped_down_to_16_texels() {
+        let mut images = vec![
+            (
+                "gui/wide".into(),
+                1000,
+                490,
+                [1, 1, 1, 255].repeat(1000 * 490),
+            ),
+            ("m:gui/dot".into(), 31, 31, [2, 2, 2, 255].repeat(31 * 31)),
+        ];
+        assert!(HudAtlas::layout(&images, 1024).is_err());
+        let mut sizes = HashMap::new();
+        HudAtlas::layout_capping_mod_textures(&mut images, &mut sizes, &HashSet::new(), 1024)
+            .unwrap();
+        let dot = images.iter().find(|i| i.0 == "m:gui/dot").unwrap();
+        assert_eq!((dot.1, dot.2), (16, 16));
+        assert_eq!(sizes["m:gui/dot"], (31, 31));
+    }
     #[test]
     fn fitting_models_keep_their_pixels_and_existing_logical_sizes() {
         let mut images = vec![("item/gem".into(), 32, 32, [1, 2, 3, 255].repeat(32 * 32))];

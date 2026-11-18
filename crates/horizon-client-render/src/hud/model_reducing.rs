@@ -148,17 +148,20 @@ impl HudAtlas {
                 Ok(layout) => return Ok(layout),
                 Err(error) => error,
             };
-            cap /= 2;
-            if cap < 16 {
+            // Halve the cap down to 16 texels, which is tried too, and no further.
+            if cap <= 16 {
                 return Err(error);
             }
+            cap = (cap / 2).max(16);
             let mut changed = false;
             for (name, w, h, pixels) in images.iter_mut() {
                 let side = (*w).max(*h);
                 if side <= cap || !capped(name, pixels) {
                     continue;
                 }
-                let (nw, nh) = ((*w * cap / side).max(1), (*h * cap / side).max(1));
+                // In 64 bits: a side times the cap passes `u32` for a very long particle strip.
+                let fit = |v: u32| (u64::from(v) * u64::from(cap) / u64::from(side)).max(1) as u32;
+                let (nw, nh) = (fit(*w), fit(*h));
                 gui_sizes.entry(name.clone()).or_insert((*w, *h));
                 *pixels = scaled(pixels, (*w, *h), (nw, nh));
                 (*w, *h) = (nw, nh);
@@ -177,7 +180,9 @@ fn scaled(pixels: &[u8], from: (u32, u32), to: (u32, u32)) -> Vec<u8> {
     let mut out = Vec::with_capacity((nw * nh * 4) as usize);
     for y in 0..nh {
         for x in 0..nw {
-            let at = (((y * h / nh) * w + x * w / nw) * 4) as usize;
+            let (y, x) = (u64::from(y), u64::from(x));
+            let row = y * u64::from(h) / u64::from(nh);
+            let at = ((row * u64::from(w) + x * u64::from(w) / u64::from(nw)) * 4) as usize;
             out.extend_from_slice(&pixels[at..at + 4]);
         }
     }
