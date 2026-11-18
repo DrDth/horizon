@@ -1608,8 +1608,9 @@ pub struct Renderer {
     sprite_split: u32,
     /// A 1-layer array bound where a pack needs fewer arrays.
     sprite_unused: wgpu::TextureView,
-    /// The sprite arrays its terrain layout binds ([`SPRITE_ARRAYS`] or [`MORE_SPRITE_ARRAYS`]):
-    /// its views are rebuilt with this count, whatever a later renderer chose.
+    /// The sprite arrays its terrain layout binds ([`SPRITE_ARRAYS`] or [`MORE_SPRITE_ARRAYS`]),
+    /// not the ones the pack fills: its views are rebuilt with this count, whatever a later
+    /// renderer chose.
     sprite_arrays: u32,
     /// The sprite arrays as the terrain samples them (`SPRITE_ARRAYS` views, `sprite_unused`
     /// past the ones in use, the Mipmap Levels option's levels), for native mods
@@ -1978,30 +1979,29 @@ static BOUND_SPRITE_ARRAYS: std::sync::atomic::AtomicU32 =
 pub(crate) fn bound_sprite_arrays() -> u32 {
     BOUND_SPRITE_ARRAYS.load(std::sync::atomic::Ordering::Relaxed)
 }
-fn set_bound_sprite_arrays(arrays: u32) {
-    BOUND_SPRITE_ARRAYS.store(arrays, std::sync::atomic::Ordering::Relaxed);
-}
 /// [`BOUND_SPRITE_ARRAYS`] for a renderer being built; unless it is built (`kept`), the
 /// count from before comes back, so a renderer kept after a failed replacement still
 /// builds shaders for the arrays its layout binds.
-struct BoundArrays {
+struct BoundArrays<'a> {
+    count: &'a std::sync::atomic::AtomicU32,
     previous: u32,
     kept: bool,
 }
-impl BoundArrays {
-    fn set(arrays: u32) -> Self {
-        let previous = bound_sprite_arrays();
-        set_bound_sprite_arrays(arrays);
+impl<'a> BoundArrays<'a> {
+    fn set(count: &'a std::sync::atomic::AtomicU32, arrays: u32) -> Self {
+        let previous = count.swap(arrays, std::sync::atomic::Ordering::Relaxed);
         Self {
+            count,
             previous,
             kept: false,
         }
     }
 }
-impl Drop for BoundArrays {
+impl Drop for BoundArrays<'_> {
     fn drop(&mut self) {
         if !self.kept {
-            set_bound_sprite_arrays(self.previous);
+            self.count
+                .store(self.previous, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -2462,10 +2462,10 @@ impl Renderer {
         };
         // Computed once: the sprite arrays, the shaders' constants and the
         // shader pack atlas all cut the sprites by it.
-        let (sprite_arrays, split) = check_layers(&adapter, layers)?;
+        let (bound_arrays, split) = check_layers(&adapter, layers)?;
         // The shaders built below read the count; a replacement that fails puts the
         // kept renderer's back.
-        let mut bound = BoundArrays::set(sprite_arrays);
+        let mut bound = BoundArrays::set(&BOUND_SPRITE_ARRAYS, bound_arrays);
         let info = adapter.get_info();
         surface_setup::log_sprite_split(&info, split, layers);
         crate::graphics::suggest_reduced_far_detail(crate::graphics::lod_capped(&info));
@@ -3192,7 +3192,7 @@ impl Renderer {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             });
-        let sprite_views = sprite_views(&sprite_textures, &sprite_unused, None, sprite_arrays);
+        let sprite_views = sprite_views(&sprite_textures, &sprite_unused, None, bound_arrays);
         let sprite_sampler = device.create_sampler(&sprite_sampler_descriptor(1));
         let sprite_nearest = device.create_sampler(&SPRITE_NEAREST);
         let lightmap = device.create_texture(&wgpu::TextureDescriptor {
@@ -4598,7 +4598,7 @@ impl Renderer {
             lightmap,
             sprite_textures,
             sprite_unused,
-            sprite_arrays,
+            sprite_arrays: bound_arrays,
             sprite_views,
             mip_levels,
             mipmaps: mip_levels - 1,
@@ -12906,6 +12906,20 @@ mod tests {
         naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::all())
             .validate(&module)
             .unwrap();
+    }
+
+    /// A renderer that isn't built puts the bound arrays back, so the one kept builds
+    /// shaders for its own layout; a built one keeps its count.
+    #[test]
+    fn a_failed_renderer_puts_the_bound_arrays_back() {
+        let count = std::sync::atomic::AtomicU32::new(MORE_SPRITE_ARRAYS);
+        drop(BoundArrays::set(&count, SPRITE_ARRAYS));
+        assert_eq!(count.into_inner(), MORE_SPRITE_ARRAYS);
+        let count = std::sync::atomic::AtomicU32::new(SPRITE_ARRAYS);
+        let mut built = BoundArrays::set(&count, MORE_SPRITE_ARRAYS);
+        built.kept = true;
+        drop(built);
+        assert_eq!(count.into_inner(), MORE_SPRITE_ARRAYS);
     }
 
     #[test]
