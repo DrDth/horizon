@@ -175,6 +175,88 @@ pub fn renamed_in_26_3(name: &str) -> Option<String> {
     })
 }
 
+/// Vanilla's carver types, 1.21.1's and 26.3's (`nether_cave` became `cave`).
+const CARVER_TYPES: [&str; 3] = ["cave", "nether_cave", "canyon"];
+
+/// The carver id of `data/<ns>/worldgen/{configured_carver,carver}/<path>.json`.
+fn carver_id(name: &str) -> Option<String> {
+    let (ns, rest) = name.strip_prefix("data/")?.split_once('/')?;
+    let rest = rest.strip_prefix("worldgen/")?;
+    let path = ["configured_carver/", "carver/"]
+        .iter()
+        .find_map(|folder| rest.strip_prefix(folder))?
+        .strip_suffix(".json")?;
+    Some(format!("{ns}:{path}"))
+}
+
+/// The mod's carvers of a type written in Java (any but vanilla's), with that
+/// type, by carver id. The game generates vanilla's carvers only and refuses
+/// a world whose carvers hold another type, so these stay outside
+/// ([`java_carver`]) and the mod's biomes stop naming them ([`drop_carvers`]).
+pub fn java_carvers<R: Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
+) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let mut budget = crate::entry::Budget::archive();
+    for i in 0..zip.len() {
+        let Ok(mut entry) = zip.by_index(i) else {
+            continue;
+        };
+        let Some(id) = entry.name().ok().as_deref().and_then(carver_id) else {
+            continue;
+        };
+        let declared = entry.size();
+        let Ok(text) = budget.read_text(&mut entry, declared, crate::entry::MAX_TEXT) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else {
+            continue;
+        };
+        if let Some(t) = v["type"].as_str()
+            && !CARVER_TYPES.contains(&t.strip_prefix("minecraft:").unwrap_or(t))
+        {
+            out.insert(id, t.to_owned());
+        }
+    }
+    out
+}
+
+/// Why the carry leaves a carver file outside: its type is Java code
+/// ([`java_carvers`]).
+pub fn java_carver(name: &str, carvers: &BTreeMap<String, String>) -> Option<String> {
+    let t = carvers.get(&carver_id(name)?)?;
+    Some(format!(
+        "carver type {t} is the mod's Java code; the game generates vanilla's carvers only"
+    ))
+}
+
+/// A biome's `carvers` without the ones left outside ([`java_carvers`]);
+/// whether any was named.
+pub fn drop_carvers(biome: &mut Value, carvers: &BTreeMap<String, String>) -> bool {
+    let java = |c: &Value| {
+        c.as_str().is_some_and(|id| {
+            let id = if id.contains(':') {
+                id.to_owned()
+            } else {
+                format!("minecraft:{id}")
+            };
+            carvers.contains_key(&id)
+        })
+    };
+    match biome.get_mut("carvers") {
+        Some(Value::Array(list)) => {
+            let before = list.len();
+            list.retain(|c| !java(c));
+            list.len() != before
+        }
+        Some(single) if java(single) => {
+            *single = Value::Array(Vec::new());
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Rewrites one `data/<ns>/worldgen/<kind>/...` file in place; whether it
 /// changed.
 /// `set_tags` are the mod's structure set tags, expanded

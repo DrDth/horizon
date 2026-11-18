@@ -93,7 +93,7 @@ pub struct Report {
     pub outside: Vec<String>,
     /// Files of the mod's own content the game would refuse, kept in
     /// `outside/` too, with why: a path vanilla does not read (upper case),
-    /// JSON that does not parse.
+    /// JSON that does not parse, a carver of a type written in Java.
     pub unreadable: BTreeMap<String, String>,
     pub recipes_upgraded: usize,
     pub loot_tables_upgraded: usize,
@@ -1097,6 +1097,7 @@ pub fn carry(
     let mut biome_conventions = BTreeSet::new();
     let set_tags = crate::worldgen::structure_set_tags(&mut zip);
     let piece_counts = crate::worldgen::piece_counts(&mut zip);
+    let java_carvers = crate::worldgen::java_carvers(&mut zip);
     let mut processor_data = crate::processors::ProcessorData::read(&mut zip);
     processor_data.mark_loaded(loaded);
     report.namespaces = extra_namespaces(&mut zip, id, pack.mods);
@@ -1126,6 +1127,7 @@ pub fn carry(
             .map_err(|e| format!("{name}: {e}"))?;
         let unreadable = if keep {
             unreadable(&name, &mut bytes)
+                .or_else(|| crate::worldgen::java_carver(&name, &java_carvers))
         } else {
             None
         };
@@ -1218,6 +1220,9 @@ pub fn carry(
                     );
                     let mut changed =
                         crate::worldgen::upgrade(kind, &mut v, types, &set_tags) || carried;
+                    if kind == "biome" {
+                        changed |= crate::worldgen::drop_carvers(&mut v, &java_carvers);
+                    }
                     if kind == "structure" {
                         let path = rel.trim_start_matches("worldgen/structure/");
                         let structure = format!("{ns}:{}", path.trim_end_matches(".json"));
@@ -2275,6 +2280,50 @@ mod tests {
         assert_eq!(biome.get("spawners"), None);
         assert!(!worldgen.join("configured_carver").exists());
         assert!(!worldgen.join("configured_feature").exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A carver of the mod's own type is Java code the game can't run, and
+    /// one such carver refuses the world: it stays outside, and the mod's
+    /// biomes keep only the carvers that were carried.
+    #[test]
+    fn carvers_written_in_java_stay_outside_and_leave_the_biomes() {
+        let dir = temp_dir("java-carvers");
+        let jar = dir.join("java-carvers.jar");
+        let crater = "data/example/worldgen/configured_carver/crater.json";
+        write_jar(
+            &jar,
+            &[
+                (
+                    "data/example/worldgen/biome/moon.json",
+                    br#"{"has_precipitation": false, "temperature": 0.5, "downfall": 0.0,
+                        "effects": {"water_color": 4159204}, "features": [],
+                        "carvers": {"air": ["example:crater", "example:rift"]},
+                        "spawners": {}, "spawn_costs": {}}"#,
+                ),
+                (
+                    crater,
+                    br#"{"type": "example:crater", "config": {"probability": 0.1,
+                        "y": {"absolute": 60}}}"#,
+                ),
+                (
+                    "data/example/worldgen/configured_carver/rift.json",
+                    br#"{"type": "minecraft:canyon", "config": {"probability": 0.02,
+                        "y": {"absolute": 20}, "yScale": 3.0, "vertical_rotation": 0.0,
+                        "shape": {"thickness": 2.0}}}"#,
+                ),
+            ],
+        );
+        let out = dir.join("out");
+        let report = carry_alone(&jar, &out).unwrap();
+        let worldgen = out.join("carry/data/example/worldgen");
+        assert!(!worldgen.join("carver/crater.json").exists());
+        assert!(worldgen.join("carver/rift.json").exists());
+        assert!(out.join("outside").join(crater).exists());
+        assert!(report.unreadable[crater].contains("example:crater"));
+        let biome: Value =
+            serde_json::from_slice(&fs::read(worldgen.join("biome/moon.json")).unwrap()).unwrap();
+        assert_eq!(biome["carvers"], json!(["example:rift"]));
         fs::remove_dir_all(&dir).unwrap();
     }
 
