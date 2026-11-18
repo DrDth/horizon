@@ -474,8 +474,8 @@ fn a_biome_modifier_declared_in_code_applies_to_the_root_biomes() {
     fs::remove_dir_all(scratch).unwrap();
 }
 
-/// `add_carvers` and `remove_carvers` edit a biome's `carvers`; a carver the root lacks is
-/// skipped with a warning.
+/// `add_carvers` and `remove_carvers` edit a biome's `carvers`, a mod's own carvers included;
+/// a carver the root lacks is skipped with a warning.
 #[test]
 fn carver_modifiers_edit_the_biomes_carvers() {
     let base = biome_base("biome-modifiers-carvers");
@@ -501,7 +501,7 @@ fn carver_modifiers_edit_the_biomes_carvers() {
         r##"{"temperature":0.8,"carvers":"#zinc:caves"}"##.into(),
     );
     fs::write(&path, serde_json::to_string(&bundle).unwrap()).unwrap();
-    let m = zinc_mod(
+    zinc_mod(
         &scratch.join("zinc"),
         &[
             (
@@ -516,7 +516,19 @@ fn carver_modifiers_edit_the_biomes_carvers() {
                 "missing",
                 r#"{"type":"neoforge:add_carvers","biomes":"minecraft:desert","carvers":"zinc:none"}"#,
             ),
+            (
+                "vent",
+                r#"{"type":"neoforge:add_carvers","biomes":"minecraft:desert","carvers":"zinc:vent"}"#,
+            ),
         ],
+    );
+    // The mod's own carver, which only the merged bundle has.
+    let m = folder_mod(
+        &scratch.join("zinc"),
+        &[(
+            "data/zinc/worldgen/carver/vent.json",
+            r#"{"type":"minecraft:cave"}"#,
+        )],
     );
     let out = scratch.join("out");
     let warnings = build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
@@ -525,7 +537,10 @@ fn carver_modifiers_edit_the_biomes_carvers() {
     let carvers = |id: &str| {
         serde_json::from_str::<serde_json::Value>(&after[id]).unwrap()["carvers"].clone()
     };
-    assert_eq!(carvers("minecraft:desert"), serde_json::json!(["zinc:pit"]));
+    assert_eq!(
+        carvers("minecraft:desert"),
+        serde_json::json!(["zinc:pit", "zinc:vent"])
+    );
     assert_eq!(carvers("minecraft:plains"), serde_json::json!([]));
     assert!(
         warnings

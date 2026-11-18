@@ -2521,7 +2521,13 @@ fn place_in_biomes(
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
     let (entity_categories, entity_tags) = modifier_entities(base, overlay, tags)?;
-    let carver_ids = biomes::carver_ids(&base.join(CARVERS))?;
+    // The carvers bundle with the mods' own carvers, written before this
+    // (`WORLDGEN_BUNDLES`), so a modifier may add one of them.
+    let mut carvers = out_path(overlay, CARVERS);
+    if !carvers.exists() {
+        carvers = base.join(CARVERS);
+    }
+    let carver_ids = biomes::carver_ids(&carvers)?;
     let mut saved = SavedModifiers {
         carver_ids,
         carver_tags: modifier_tags(base, overlay, tags, "worldgen/carver")?,
