@@ -517,7 +517,11 @@ fn context_predicate(p: &mut Value) {
         Value::Object(o)
             if !["predicate", "term", "terms"]
                 .iter()
-                .any(|k| o.contains_key(*k)) =>
+                .any(|k| o.contains_key(*k))
+                && !o
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(loot_condition) =>
         {
             let mut entity = std::mem::take(p);
             upgrade_entity_predicate(&mut entity);
@@ -559,6 +563,40 @@ fn java_damage_values(damage: &mut Value) -> Vec<String> {
         }
     }
     defaulted
+}
+
+/// 26.3's loot condition types, and those 1.21.1 had that 26.3 renamed: a bare object with
+/// one of these as its `type` is already a condition, not an entity predicate whose `type`
+/// is an entity type (`{"type": "minecraft:wolf"}`).
+const LOOT_CONDITIONS: [&str; 23] = [
+    "all_of",
+    "any_of",
+    "damage_source_properties",
+    "enchantment_active_check",
+    "entity_properties",
+    "entity_scores",
+    "environment_attribute_check",
+    "float_value_check",
+    "int_value_check",
+    "inverted",
+    "killed_by_player",
+    "location_check",
+    "match_block",
+    "match_tool",
+    "random_chance",
+    "random_chance_with_enchanted_bonus",
+    "survives_explosion",
+    "table_bonus",
+    "time_check",
+    "weather_check",
+    "block_state_property",
+    "value_check",
+    "reference",
+];
+
+/// Whether `kind` is a vanilla loot condition type ([`LOOT_CONDITIONS`]).
+fn loot_condition(kind: &str) -> bool {
+    LOOT_CONDITIONS.contains(&kind.strip_prefix("minecraft:").unwrap_or(kind))
 }
 
 /// A 1.21.1 loot table in 26.3's shape, in place: `conditions` lists become
@@ -2664,6 +2702,15 @@ mod tests {
         );
         // Already 26.3's: unchanged.
         assert!(!upgrade_advancement(&mut a));
+        // A single condition stays one on the next pass, not an entity type of its name.
+        let mut chance = json!({"criteria": {"luck": {"trigger": "minecraft:tick",
+            "conditions": {"player": [{"condition": "minecraft:random_chance", "chance": 0.5}]}}}});
+        assert!(upgrade_advancement(&mut chance));
+        assert!(!upgrade_advancement(&mut chance));
+        assert_eq!(
+            chance["criteria"]["luck"]["conditions"]["player"],
+            json!({"type": "minecraft:random_chance", "chance": 0.5})
+        );
     }
 
     /// 26.3 has no `minecraft:reference`: the condition is the predicate's id.
