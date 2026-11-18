@@ -1608,6 +1608,9 @@ pub struct Renderer {
     sprite_split: u32,
     /// A 1-layer array bound where a pack needs fewer arrays.
     sprite_unused: wgpu::TextureView,
+    /// The sprite arrays its terrain layout binds ([`SPRITE_ARRAYS`] or [`MORE_SPRITE_ARRAYS`]):
+    /// its views are rebuilt with this count, whatever a later renderer chose.
+    sprite_arrays: u32,
     /// The sprite arrays as the terrain samples them (`SPRITE_ARRAYS` views, `sprite_unused`
     /// past the ones in use, the Mipmap Levels option's levels), for native mods
     /// (`WorldDrawn::block_sprites`).
@@ -1978,6 +1981,30 @@ pub(crate) fn bound_sprite_arrays() -> u32 {
 fn set_bound_sprite_arrays(arrays: u32) {
     BOUND_SPRITE_ARRAYS.store(arrays, std::sync::atomic::Ordering::Relaxed);
 }
+/// [`BOUND_SPRITE_ARRAYS`] for a renderer being built; unless it is built (`kept`), the
+/// count from before comes back, so a renderer kept after a failed replacement still
+/// builds shaders for the arrays its layout binds.
+struct BoundArrays {
+    previous: u32,
+    kept: bool,
+}
+impl BoundArrays {
+    fn set(arrays: u32) -> Self {
+        let previous = bound_sprite_arrays();
+        set_bound_sprite_arrays(arrays);
+        Self {
+            previous,
+            kept: false,
+        }
+    }
+}
+impl Drop for BoundArrays {
+    fn drop(&mut self) {
+        if !self.kept {
+            set_bound_sprite_arrays(self.previous);
+        }
+    }
+}
 /// The layers to give a square texture of `count` layers viewed as a 2D
 /// array. wgpu's OpenGL backend picks a texture's target from its layer
 /// count when it is created: one layer makes a 2D texture and a multiple of
@@ -1996,8 +2023,9 @@ fn sprite_views(
     textures: &[wgpu::Texture],
     unused: &wgpu::TextureView,
     mips: Option<u32>,
+    arrays: u32,
 ) -> Vec<wgpu::TextureView> {
-    (0..bound_sprite_arrays() as usize)
+    (0..arrays as usize)
         .map(|i| match textures.get(i) {
             Some(t) => t.create_view(&wgpu::TextureViewDescriptor {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -2434,7 +2462,10 @@ impl Renderer {
         };
         // Computed once: the sprite arrays, the shaders' constants and the
         // shader pack atlas all cut the sprites by it.
-        let split = check_layers(&adapter, layers)?;
+        let (sprite_arrays, split) = check_layers(&adapter, layers)?;
+        // The shaders built below read the count; a replacement that fails puts the
+        // kept renderer's back.
+        let mut bound = BoundArrays::set(sprite_arrays);
         let info = adapter.get_info();
         surface_setup::log_sprite_split(&info, split, layers);
         crate::graphics::suggest_reduced_far_detail(crate::graphics::lod_capped(&info));
@@ -3161,7 +3192,7 @@ impl Renderer {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             });
-        let sprite_views = sprite_views(&sprite_textures, &sprite_unused, None);
+        let sprite_views = sprite_views(&sprite_textures, &sprite_unused, None, sprite_arrays);
         let sprite_sampler = device.create_sampler(&sprite_sampler_descriptor(1));
         let sprite_nearest = device.create_sampler(&SPRITE_NEAREST);
         let lightmap = device.create_texture(&wgpu::TextureDescriptor {
@@ -4415,6 +4446,7 @@ impl Renderer {
             world_primitives::DEFAULT_CAPACITY,
         );
         let views = world_views::Kept::new(flipped, translucent_flipped, entity_pipeline_with);
+        bound.kept = true;
         Ok(Self {
             msaa,
             display: None,
@@ -4566,6 +4598,7 @@ impl Renderer {
             lightmap,
             sprite_textures,
             sprite_unused,
+            sprite_arrays,
             sprite_views,
             mip_levels,
             mipmaps: mip_levels - 1,
@@ -6262,7 +6295,12 @@ impl Renderer {
         if let Some(hdr) = &self.hdr {
             // The thresholds pass binds the first arrays only; past them the texels stay 0
             // and every pixel of a light source may shine, as with HDR off.
-            let views = sprite_views(&self.sprite_textures, &self.sprite_unused, None);
+            let views = sprite_views(
+                &self.sprite_textures,
+                &self.sprite_unused,
+                None,
+                self.sprite_arrays,
+            );
             let first = &views[..SPRITE_ARRAYS as usize];
             self.emission_stats
                 .measure(&self.device, &self.queue, first, hdr.masks);
@@ -6959,6 +6997,7 @@ impl Renderer {
             &self.sprite_textures,
             &self.sprite_unused,
             Some(self.mipmaps + 1),
+            self.sprite_arrays,
         );
         self.group = terrain_group(
             &self.device,
