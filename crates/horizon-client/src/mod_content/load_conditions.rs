@@ -200,6 +200,7 @@ pub fn build_with_conditions(
     let mut warnings = Vec::new();
     let mut worldgen: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
     let mut additions: BTreeMap<&str, Vec<Addition>> = BTreeMap::new();
+    let mut skipped_carvers: Vec<String> = Vec::new();
     let mut modifiers = Vec::new();
     let mut structure_modifiers = Vec::new();
     let mut namespaces: std::collections::BTreeSet<String> = mods
@@ -285,6 +286,16 @@ pub fn build_with_conditions(
                         )?);
                     } else if let Some((bundle, id)) = worldgen_entry(&file) {
                         let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
+                        // The world decodes every carver at start, used or
+                        // not: one it can't read is left out.
+                        if bundle == CARVERS
+                            && let Err(e) =
+                                horizon_world::worldgen::carver::WorldCarver::from_json(&text)
+                        {
+                            warnings.push(format!("mod {}: {file}: carver left out: {e}", m.id));
+                            skipped_carvers.push(id);
+                            continue;
+                        }
                         let entries = worldgen.entry(bundle).or_default();
                         match Addition::read(bundle, &text).map_err(|e| format!("{file}: {e}"))? {
                             Some(addition) => additions.entry(bundle).or_default().push(addition),
@@ -378,6 +389,21 @@ pub fn build_with_conditions(
         }
         let mut doc = read_json(&base.join(bundle))?;
         for (id, text) in entries {
+            // A mod's biome naming a carver left out above would stop the
+            // world as well: the biome keeps its other carvers.
+            if *bundle == BIOMES && !skipped_carvers.is_empty() {
+                let mut biome: J = serde_json::from_str(text).map_err(|e| format!("{id}: {e}"))?;
+                let before = biome.clone();
+                if biomes::edit_carvers(&mut biome, false, &skipped_carvers).is_ok()
+                    && biome != before
+                {
+                    warnings.push(format!(
+                        "biome {id}: names a carver left out, dropped from it"
+                    ));
+                    doc.set(id, J::Str(serde_json::to_string(&biome)?));
+                    continue;
+                }
+            }
             doc.set(id, J::Str(text.clone()));
         }
         if let Some(list) = additions.get_mut(bundle) {

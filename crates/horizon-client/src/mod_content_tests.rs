@@ -2039,7 +2039,8 @@ fn additions_append_by_priority_then_order_and_skip_unknown_targets() {
 }
 
 /// A mod's own carver joins the carvers bundle, so a biome of the mod that
-/// names it finds it.
+/// names it finds it. One of a type the world can't decode is left out, and
+/// out of the mod's biomes, so the world still opens.
 #[test]
 #[ignore = "daily"]
 fn content_root_carries_a_mods_carver() {
@@ -2051,6 +2052,11 @@ fn content_root_carries_a_mods_carver() {
     let dir = scratch.join("hollows");
     let vanilla: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(base.join("worldgen/carvers.json")).unwrap()).unwrap();
+    let biomes: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(base.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let mut hollow: serde_json::Value = serde_json::from_str(&biomes["minecraft:plains"]).unwrap();
+    hollow["carvers"] = serde_json::json!(["hollows:deep_cave", "hollows:vent"]);
+    let hollow = hollow.to_string();
     let files = [
         (
             "horizon-mod.toml",
@@ -2061,6 +2067,12 @@ fn content_root_carries_a_mods_carver() {
             "data/hollows/worldgen/carver/deep_cave.json",
             vanilla["minecraft:cave"].as_str(),
         ),
+        // A carver type of the mod's Java.
+        (
+            "data/hollows/worldgen/carver/vent.json",
+            r#"{"type": "hollows:vent", "config": {"probability": 0.1}}"#,
+        ),
+        ("data/hollows/worldgen/biome/hollow.json", hollow.as_str()),
     ];
     for (name, text) in files {
         let path = dir.join(name);
@@ -2084,6 +2096,11 @@ fn content_root_carries_a_mods_carver() {
         serde_json::from_slice(&fs::read(root.join("worldgen/carvers.json")).unwrap()).unwrap();
     assert_eq!(carvers["hollows:deep_cave"], vanilla["minecraft:cave"]);
     assert!(carvers.contains_key("minecraft:cave"));
+    assert!(!carvers.contains_key("hollows:vent"));
+    let biomes: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(root.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let hollow: serde_json::Value = serde_json::from_str(&biomes["hollows:hollow"]).unwrap();
+    assert_eq!(hollow["carvers"], serde_json::json!(["hollows:deep_cave"]));
     let _ = fs::remove_dir_all(&scratch);
 }
 

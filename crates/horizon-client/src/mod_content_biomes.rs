@@ -979,7 +979,11 @@ fn modify(biome: &mut J, changes: &Changes) {
 }
 
 /// One carver modifier's change to one biome's `carvers` (a list of configured carver ids).
-fn edit_carvers(biome: &mut J, add: bool, carvers: &[String]) -> std::result::Result<(), String> {
+pub(super) fn edit_carvers(
+    biome: &mut J,
+    add: bool,
+    carvers: &[String],
+) -> std::result::Result<(), String> {
     if biome.get("carvers").is_none() {
         if !add {
             return Ok(());
