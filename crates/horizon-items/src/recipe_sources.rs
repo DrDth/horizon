@@ -24,8 +24,14 @@ impl RootItems<'_> {
                 let bytes = std::fs::read(self.root.join("items.json")).ok()?;
                 let items: HashMap<String, serde::de::IgnoredAny> =
                     serde_json::from_slice(&bytes).ok()?;
-                let tags = crate::items::load_tags(self.root, "item", &self.overlay).ok()?;
-                Some((items.into_keys().collect(), tags))
+                let items: HashSet<String> = items.into_keys().collect();
+                // A tag lists entries for items that may not be there (optional ones);
+                // vanilla's tag holds only the items that are, so `tag_empty` counts those.
+                let mut tags = crate::items::load_tags(self.root, "item", &self.overlay).ok()?;
+                for members in tags.values_mut() {
+                    members.retain(|id| items.contains(id));
+                }
+                Some((items, tags))
             })
             .as_ref()
     }
@@ -165,6 +171,10 @@ mod tests {
             "data/c/tags/item/ingots/copper.json",
             &json!({"values": ["minecraft:stick"]}),
         );
+        write(
+            "data/c/tags/item/ingots/silver.json",
+            &json!({"values": [{"id": "gem:silver_ingot", "required": false}]}),
+        );
         fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         for (name, condition) in [
             (
@@ -188,6 +198,10 @@ mod tests {
                 "tin_fallback",
                 json!({"type": "neoforge:tag_empty", "tag": "c:ingots/tin"}),
             ),
+            (
+                "silver_fallback",
+                json!({"type": "neoforge:tag_empty", "tag": "c:ingots/silver"}),
+            ),
             ("never", json!({"type": "neoforge:false"})),
         ] {
             let recipe = json!({"type": "minecraft:crafting_shapeless",
@@ -201,7 +215,15 @@ mod tests {
             .map(|(name, _)| name)
             .collect();
         loaded.sort();
-        assert_eq!(loaded, ["gem:from_copper", "gem:ruby", "gem:tin_fallback"]);
+        assert_eq!(
+            loaded,
+            [
+                "gem:from_copper",
+                "gem:ruby",
+                "gem:silver_fallback",
+                "gem:tin_fallback"
+            ]
+        );
         let _ = fs::remove_dir_all(&root);
     }
 }

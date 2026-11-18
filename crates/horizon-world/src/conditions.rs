@@ -223,20 +223,7 @@ impl LoadConditions {
             .0
             .as_ref()
             .expect("owning candidate diagnostics");
-        // An answer given with the load's items may differ from one without them.
-        let key = if items.is_some() {
-            format!("{path} (items)")
-        } else {
-            path.to_owned()
-        };
-        let cell = state
-            .lock()
-            .unwrap()
-            .cache
-            .entry((key, payload.to_string()))
-            .or_default()
-            .clone();
-        *cell.get_or_init(|| {
+        let answer = || {
             let mut unknown = BTreeSet::new();
             let result = evaluate(
                 file,
@@ -254,15 +241,28 @@ impl LoadConditions {
             match result {
                 Ok(answer) => answer,
                 Err(error) => {
-                    state
-                        .lock()
-                        .unwrap()
-                        .errors
-                        .push(format!("{path}: {error}"));
+                    let error = format!("{path}: {error}");
+                    let mut state = state.lock().unwrap();
+                    if !state.errors.contains(&error) {
+                        state.errors.push(error);
+                    }
                     false
                 }
             }
-        })
+        };
+        // Every load that reaches this candidate shares its cache. An answer that
+        // asked a load's items holds for those items only, so it isn't kept.
+        if items.is_some() {
+            return answer();
+        }
+        let cell = state
+            .lock()
+            .unwrap()
+            .cache
+            .entry((path.to_owned(), payload.to_string()))
+            .or_default()
+            .clone();
+        *cell.get_or_init(answer)
     }
 
     fn report_unknown(&self, path: &str, names: BTreeSet<String>) {
@@ -569,6 +569,29 @@ mod tests {
         assert!(!allows(json!({"type": "neoforge:false"})));
         let without_items = file(json!({"type": "neoforge:item_exists", "item": "gem:ruby"}));
         assert!(!conditions.allows(&without_items));
+    }
+
+    struct Present(&'static [&'static str]);
+    impl ItemFacts for Present {
+        fn item_exists(&self, id: &str) -> Option<bool> {
+            Some(self.0.contains(&id))
+        }
+        fn item_tag_empty(&self, _: &str) -> Option<bool> {
+            Some(true)
+        }
+    }
+
+    /// A candidate with registered handlers caches its answers, and every load that
+    /// reaches it shares them: an answer about items holds for the load that asked.
+    #[test]
+    fn item_answers_hold_for_the_items_that_gave_them() {
+        let conditions = LoadConditions::new(["gem"]).with_lookup(BTreeMap::new(), |_, _| None);
+        let file = json!({"neoforge:conditions": [
+            {"type": "neoforge:item_exists", "item": "gem:ruby"}]});
+        let with = Present(&["gem:ruby"]);
+        let without = Present(&[]);
+        assert!(conditions.allows_id_with_items(&file, "recipe", "gem:x", Some(&with)));
+        assert!(!conditions.allows_id_with_items(&file, "recipe", "gem:x", Some(&without)));
     }
 
     fn loaded(id: &str) -> bool {
