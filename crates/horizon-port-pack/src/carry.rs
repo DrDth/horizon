@@ -1241,6 +1241,7 @@ pub fn carry(
             } else if (rel.starts_with("neoforge/biome_modifier/")
                 || rel.starts_with("forge/biome_modifier/"))
                 && name.starts_with("data/")
+                && name.ends_with(".json")
             {
                 // The biomes a modifier changes, often by the loader's tags (`#c:is_overworld`).
                 if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
@@ -2925,7 +2926,7 @@ mod tests {
                 ),
                 (
                     "data/example/forge/biome_modifier/nether_tin.json",
-                    br##"{"type": "forge:add_features", "biomes": ["#c:is_nether"],
+                    br##"{"type": "forge:add_features", "biomes": "#c:is_nether",
                         "features": "example:nether_tin_ore", "step": "underground_ores"}"##,
                 ),
             ],
