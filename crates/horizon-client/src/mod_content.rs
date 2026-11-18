@@ -2332,10 +2332,12 @@ const TAG_BUNDLES: [&str; 2] = ["block-tags.json", "worldgen/block_tags.json"];
 const BIOME_TAGS: &str = "worldgen/biome_tags.json";
 /// Worldgen registries a content mod may add to, and the bundle the
 /// worldgen loader reads each from (id → the file's text): what structure
-/// mods hold, and a mod's own biomes (never vanilla's: `worldgen_entry`).
-/// Noise and density functions change the terrain and are not read from mods.
-const WORLDGEN_BUNDLES: [(&str, &str); 7] = [
+/// mods hold, and a mod's own biomes (never vanilla's: `worldgen_entry`) and
+/// the carvers they name. Noise and density functions change the terrain and
+/// are not read from mods.
+const WORLDGEN_BUNDLES: [(&str, &str); 8] = [
     ("biome", BIOMES),
+    ("carver", CARVERS),
     ("structure", "worldgen/structures.json"),
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),

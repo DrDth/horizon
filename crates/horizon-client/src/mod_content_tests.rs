@@ -2038,6 +2038,55 @@ fn additions_append_by_priority_then_order_and_skip_unknown_targets() {
     );
 }
 
+/// A mod's own carver joins the carvers bundle, so a biome of the mod that
+/// names it finds it.
+#[test]
+#[ignore = "daily"]
+fn content_root_carries_a_mods_carver() {
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-carver-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let dir = scratch.join("hollows");
+    let vanilla: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(base.join("worldgen/carvers.json")).unwrap()).unwrap();
+    let files = [
+        (
+            "horizon-mod.toml",
+            "id = \"hollows\"\nname = \"Hollows\"\nversion = \"1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n",
+        ),
+        // Shaped as 26.3's own cave carver, under the mod's id.
+        (
+            "data/hollows/worldgen/carver/deep_cave.json",
+            vanilla["minecraft:cave"].as_str(),
+        ),
+    ];
+    for (name, text) in files {
+        let path = dir.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
+    let m = ContentMod {
+        id: "hollows".into(),
+        content: Content::read(&dir, &package.manifest).unwrap(),
+        jars: Vec::new(),
+    };
+    let root = resource_root_fixture(
+        &base,
+        Path::new(""),
+        std::slice::from_ref(&m),
+        &scratch.join("cache"),
+    )
+    .unwrap();
+    let carvers: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(root.join("worldgen/carvers.json")).unwrap()).unwrap();
+    assert_eq!(carvers["hollows:deep_cave"], vanilla["minecraft:cave"]);
+    assert!(carvers.contains_key("minecraft:cave"));
+    let _ = fs::remove_dir_all(&scratch);
+}
+
 /// A structure mod's worldgen reaches the worldgen loader: its structure,
 /// set, pool and templates join the bundles, and its biome tag keeps only
 /// what the loader knows.
