@@ -93,6 +93,11 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
         }
         parsed.push((name, v));
     }
-    conditions.check_resource_errors("recipe")?;
+    // Fork (DrDth/horizon `atm`): a condition no installed mod registers leaves
+    // its file out, logged, as vanilla's RecipeManager leaves out a file it
+    // can't read. Carried mods name their libraries' conditions
+    // (`productivelib:fluid_tag_empty`), and upstream refuses the whole
+    // recipe load for one of them (#18065). Ordinary errors still stop it.
+    conditions.check_errors()?;
     Ok(parsed)
 }
