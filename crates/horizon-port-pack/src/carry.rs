@@ -1340,8 +1340,16 @@ pub fn carry(
                 && name.starts_with("data/")
                 && name.ends_with(".json")
             {
-                // The biomes a modifier changes, often by the loader's tags (`#c:is_overworld`).
-                if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
+                if let Ok(mut v) = serde_json::from_slice::<Value>(&bytes) {
+                    // A mod's own modifier type the game skips, as NeoForge's.
+                    let types = &mut report.worldgen_types;
+                    if let Some(kind) =
+                        crate::biome_modifiers::translate(&mut v, &mut types.rules_lost)
+                    {
+                        *types.biome_modifiers_translated.entry(kind).or_default() += 1;
+                        bytes = serde_json::to_vec_pretty(&v).unwrap_or(bytes);
+                    }
+                    // The biomes a modifier changes, often by the loader's tags (`#c:is_overworld`).
                     crate::worldgen::convention_tags(&v["biomes"], &mut biome_conventions);
                 }
             } else if rel.starts_with("damage_type/")
