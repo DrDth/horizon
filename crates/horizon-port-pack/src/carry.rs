@@ -467,8 +467,10 @@ const CONTEXT_FIELDS: [&str; 12] = [
 /// player entered (Regions Unexplored's "Downer" on the first dive). Every
 /// context-aware predicate is one loot condition ([`context_predicate`]):
 /// 26.3 refuses the old forms, and with them the whole advancement load.
+/// Renamed ids are 26.3's, as in loot tables ([`renamed_ids`]).
 pub fn upgrade_advancement(v: &mut Value) -> bool {
     let before = v.clone();
+    renamed_ids(v);
     let criteria = v.get_mut("criteria").and_then(Value::as_object_mut);
     for c in criteria.into_iter().flat_map(|o| o.values_mut()) {
         let trigger = c.get("trigger").and_then(Value::as_str);
@@ -2630,7 +2632,9 @@ mod tests {
                 {"condition": "minecraft:survives_explosion"}]}},
             "strike": {"trigger": "minecraft:channeled_lightning", "conditions": {"victims": [
                 [{"condition": "minecraft:entity_properties", "entity": "this",
-                    "predicate": {"type": "minecraft:creeper"}}]]}}}});
+                    "predicate": {"type": "minecraft:creeper"}}]]}},
+            "chain": {"trigger": "minecraft:inventory_changed",
+                "conditions": {"items": [{"items": "minecraft:chain"}]}}}});
         assert!(upgrade_advancement(&mut a));
         let entity = |predicate: Value| json!({"type": "minecraft:entity_properties", "entity": "this", "predicate": predicate});
         let c = &a["criteria"];
@@ -2653,6 +2657,10 @@ mod tests {
             json!([entity(
                 json!({"minecraft:entity_type": "minecraft:creeper"})
             )])
+        );
+        assert_eq!(
+            c["chain"]["conditions"]["items"],
+            json!([{"items": "minecraft:iron_chain"}])
         );
         // Already 26.3's: unchanged.
         assert!(!upgrade_advancement(&mut a));
