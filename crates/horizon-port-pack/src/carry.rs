@@ -99,10 +99,11 @@ pub struct Report {
     pub loot_tables_upgraded: usize,
     /// Advancements whose criteria were rewritten ([`upgrade_advancement`]).
     pub advancements_upgraded: usize,
-    /// Damage types whose death message type was one a mod added to
-    /// NeoForge's enum in Java, set to vanilla's `default`, by that type.
+    /// Damage types whose death message type or effects were one a mod
+    /// added to NeoForge's enum in Java, set to vanilla's default
+    /// ([`java_damage_values`]), by `<field> <value>`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub death_messages_defaulted: BTreeMap<String, usize>,
+    pub damage_types_defaulted: BTreeMap<String, usize>,
     /// Predicate files rewritten in 26.3's shape ([`upgrade_predicate`]).
     pub predicates_upgraded: usize,
     /// Blocks whose jar has no loot table but drop themselves in the oracle:
@@ -465,16 +466,37 @@ pub fn upgrade_advancement(v: &mut Value) -> bool {
     changed
 }
 
-/// Vanilla's death message types (`DeathMessageType`).
-const DEATH_MESSAGES: [&str; 3] = ["default", "fall_variants", "intentional_game_design"];
+/// A damage type's enum fields, vanilla's values (`DeathMessageType`,
+/// `DamageEffects`), and the default of each.
+const DAMAGE_ENUMS: [(&str, &[&str]); 2] = [
+    (
+        "death_message_type",
+        &["default", "fall_variants", "intentional_game_design"],
+    ),
+    (
+        "effects",
+        &[
+            "hurt", "thorns", "drowning", "burning", "poking", "freezing",
+        ],
+    ),
+];
 
-/// A damage type's death message type when it isn't vanilla's: NeoForge lets
-/// a mod extend the enum in Java (Productive Metalworks'
-/// `productivemetalworks:foundry`), and 26.3 refuses the damage type, which
-/// stops the world.
-fn java_death_message(damage: &Value) -> Option<String> {
-    let kind = damage.get("death_message_type")?.as_str()?;
-    (!DEATH_MESSAGES.contains(&kind)).then(|| kind.to_owned())
+/// A damage type's death message type and effects set to vanilla's default
+/// (the first value) when a mod added its own to NeoForge's enum in Java
+/// (Productive Metalworks' `productivemetalworks:foundry`, the Twilight
+/// Forest's `twilightforest:pinch`): 26.3 refuses the damage type, which stops
+/// the world. The `<field> <value>` pairs set, in place.
+fn java_damage_values(damage: &mut Value) -> Vec<String> {
+    let mut defaulted = Vec::new();
+    for (field, values) in DAMAGE_ENUMS {
+        if let Some(Value::String(v)) = damage.get_mut(field)
+            && !values.contains(&v.as_str())
+        {
+            defaulted.push(format!("{field} {v}"));
+            *v = values[0].to_owned();
+        }
+    }
+    defaulted
 }
 
 /// A 1.21.1 loot table in 26.3's shape, in place: `conditions` lists become
@@ -1303,12 +1325,17 @@ pub fn carry(
                 && name.starts_with("data/")
                 && name.ends_with(".json")
             {
-                if let Ok(mut damage) = serde_json::from_slice::<Value>(&bytes)
-                    && let Some(kind) = java_death_message(&damage)
-                {
-                    *report.death_messages_defaulted.entry(kind).or_default() += 1;
-                    damage["death_message_type"] = json!("default");
-                    bytes = serde_json::to_vec_pretty(&damage).unwrap_or(bytes);
+                if let Ok(mut damage) = serde_json::from_slice::<Value>(&bytes) {
+                    let defaulted = java_damage_values(&mut damage);
+                    for field in &defaulted {
+                        *report
+                            .damage_types_defaulted
+                            .entry(field.clone())
+                            .or_default() += 1;
+                    }
+                    if !defaulted.is_empty() {
+                        bytes = serde_json::to_vec_pretty(&damage).unwrap_or(bytes);
+                    }
                 }
             } else if rel.starts_with("advancement/")
                 && name.starts_with("data/")
@@ -2335,10 +2362,10 @@ mod tests {
         );
     }
 
-    /// A death message type a mod added in Java becomes vanilla's default;
-    /// vanilla's own stay.
+    /// A death message type or effects a mod added in Java become vanilla's
+    /// default; vanilla's own stay.
     #[test]
-    fn death_message_types_of_java_become_the_default() {
+    fn damage_type_values_of_java_become_the_default() {
         let dir = temp_dir("death-messages");
         let jar = dir.join("damage.jar");
         write_jar(
@@ -2347,12 +2374,12 @@ mod tests {
                 (
                     "data/example/damage_type/melt.json",
                     br#"{"message_id": "example.melt", "scaling": "never", "exhaustion": 0.1,
-                        "death_message_type": "example:melt"}"#,
+                        "effects": "example:pinch", "death_message_type": "example:melt"}"#,
                 ),
                 (
                     "data/example/damage_type/drop.json",
                     br#"{"message_id": "example.drop", "scaling": "never", "exhaustion": 0.1,
-                        "death_message_type": "fall_variants"}"#,
+                        "effects": "burning", "death_message_type": "fall_variants"}"#,
                 ),
             ],
         );
@@ -2363,8 +2390,13 @@ mod tests {
             serde_json::from_slice(&fs::read(file).unwrap()).unwrap()
         };
         assert_eq!(read("melt")["death_message_type"], "default");
+        assert_eq!(read("melt")["effects"], "hurt");
         assert_eq!(read("drop")["death_message_type"], "fall_variants");
-        assert_eq!(report.death_messages_defaulted["example:melt"], 1);
+        assert_eq!(read("drop")["effects"], "burning");
+        assert_eq!(
+            report.damage_types_defaulted.keys().collect::<Vec<_>>(),
+            ["death_message_type example:melt", "effects example:pinch"]
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
