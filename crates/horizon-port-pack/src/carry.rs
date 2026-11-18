@@ -976,6 +976,15 @@ fn mod_item_predicate(v: &Value) -> Option<String> {
     }
 }
 
+/// A data file's JSON as the carry reads it ([`unreadable`]): without a
+/// byte-order mark, and without comments when it has them.
+pub(crate) fn lenient_json(bytes: &[u8]) -> Option<Value> {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    serde_json::from_slice(bytes)
+        .or_else(|_| serde_json::from_slice(&without_comments(bytes)))
+        .ok()
+}
+
 /// JSON text without the comments Gson's lenient reader skips: `//` and
 /// `#` to the end of the line, and `/* ... */`, outside strings.
 fn without_comments(bytes: &[u8]) -> Vec<u8> {
@@ -1097,13 +1106,16 @@ pub fn carry(
     let mut biome_conventions = BTreeSet::new();
     let set_tags = crate::worldgen::structure_set_tags(&mut zip);
     let piece_counts = crate::worldgen::piece_counts(&mut zip);
-    let java_carvers = crate::worldgen::java_carvers(&mut zip);
+    let mut java_carvers = crate::worldgen::java_carvers(&mut zip);
     let mut processor_data = crate::processors::ProcessorData::read(&mut zip);
     processor_data.mark_loaded(loaded);
     report.namespaces = extra_namespaces(&mut zip, id, pack.mods);
     let owned: Vec<&str> = std::iter::once(id.as_str())
         .chain(report.namespaces.iter().map(String::as_str))
         .collect();
+    // Another namespace's carver stays outside anyway, and its id (vanilla's
+    // `minecraft:cave`) still names the game's own.
+    java_carvers.retain(|c, _| c.split_once(':').is_some_and(|(ns, _)| owned.contains(&ns)));
     let mut budget = crate::entry::Budget::archive();
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
@@ -1143,7 +1155,10 @@ pub fn carry(
             report.copied += 1;
             // Carvers and configured features under 26.3's folder names: the
             // game reads a mod's worldgen there only.
-            inside.join(crate::worldgen::renamed_in_26_3(&name).unwrap_or_else(|| name.clone()))
+            // A file the jar also holds under the new name keeps it, as for 1.21's folders.
+            let renamed = crate::worldgen::renamed_in_26_3(&name)
+                .filter(|new| !present.contains(new.as_str()));
+            inside.join(renamed.unwrap_or_else(|| name.clone()))
         } else {
             report.outside.push(name.clone());
             outside.join(&name)
@@ -2284,13 +2299,17 @@ mod tests {
     }
 
     /// A carver of the mod's own type is Java code the game can't run, and
-    /// one such carver refuses the world: it stays outside, and the mod's
-    /// biomes keep only the carvers that were carried.
+    /// one such carver refuses the world: it stays outside (read with its
+    /// comments, as the carry reads it), and the mod's biomes keep only the
+    /// carvers that were carried, dropping inline Java ones too. Another
+    /// namespace's Java override stays outside without taking vanilla's
+    /// carver out of the biomes.
     #[test]
     fn carvers_written_in_java_stay_outside_and_leave_the_biomes() {
         let dir = temp_dir("java-carvers");
         let jar = dir.join("java-carvers.jar");
         let crater = "data/example/worldgen/configured_carver/crater.json";
+        let vent = "data/example/worldgen/configured_carver/vent.json";
         write_jar(
             &jar,
             &[
@@ -2298,8 +2317,17 @@ mod tests {
                     "data/example/worldgen/biome/moon.json",
                     br#"{"has_precipitation": false, "temperature": 0.5, "downfall": 0.0,
                         "effects": {"water_color": 4159204}, "features": [],
-                        "carvers": {"air": ["example:crater", "example:rift"]},
+                        "carvers": {"air": ["example:crater", "example:rift", "example:vent",
+                            "minecraft:cave", {"type": "example:inline", "config": {}}]},
                         "spawners": {}, "spawn_costs": {}}"#,
+                ),
+                (
+                    vent,
+                    br#"{"type": /* the mod's */ "example:vent", "config": {"probability": 0.1}}"#,
+                ),
+                (
+                    "data/minecraft/worldgen/configured_carver/cave.json",
+                    br#"{"type": "example:caves", "config": {"probability": 0.2}}"#,
                 ),
                 (
                     crater,
@@ -2321,9 +2349,11 @@ mod tests {
         assert!(worldgen.join("carver/rift.json").exists());
         assert!(out.join("outside").join(crater).exists());
         assert!(report.unreadable[crater].contains("example:crater"));
+        assert!(report.unreadable[vent].contains("example:vent"));
+        assert!(!worldgen.join("carver/vent.json").exists());
         let biome: Value =
             serde_json::from_slice(&fs::read(worldgen.join("biome/moon.json")).unwrap()).unwrap();
-        assert_eq!(biome["carvers"], json!(["example:rift"]));
+        assert_eq!(biome["carvers"], json!(["example:rift", "minecraft:cave"]));
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -205,20 +205,26 @@ pub fn java_carvers<R: Read + std::io::Seek>(
         let Some(id) = entry.name().ok().as_deref().and_then(carver_id) else {
             continue;
         };
+        // Read as the carry reads the file itself: up to its size limit,
+        // with comments.
         let declared = entry.size();
-        let Ok(text) = budget.read_text(&mut entry, declared, crate::entry::MAX_TEXT) else {
+        let Ok(bytes) = budget.read(&mut entry, declared, crate::entry::MAX_FILE) else {
             continue;
         };
-        let Ok(v) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else {
-            continue;
-        };
-        if let Some(t) = v["type"].as_str()
-            && !CARVER_TYPES.contains(&t.strip_prefix("minecraft:").unwrap_or(t))
+        if let Some(t) = crate::carry::lenient_json(&bytes)
+            .as_ref()
+            .and_then(java_type)
         {
             out.insert(id, t.to_owned());
         }
     }
     out
+}
+
+/// A carver's type when it is not vanilla's.
+fn java_type(carver: &Value) -> Option<&str> {
+    let t = carver["type"].as_str()?;
+    (!CARVER_TYPES.contains(&t.strip_prefix("minecraft:").unwrap_or(t))).then_some(t)
 }
 
 /// Why the carry leaves a carver file outside: its type is Java code
@@ -230,18 +236,20 @@ pub fn java_carver(name: &str, carvers: &BTreeMap<String, String>) -> Option<Str
     ))
 }
 
-/// A biome's `carvers` without the ones left outside ([`java_carvers`]);
-/// whether any was named.
+/// A biome's `carvers` without the ones left outside ([`java_carvers`]) and
+/// the inline ones of a Java type; whether any was there.
 pub fn drop_carvers(biome: &mut Value, carvers: &BTreeMap<String, String>) -> bool {
-    let java = |c: &Value| {
-        c.as_str().is_some_and(|id| {
+    let java = |c: &Value| match c {
+        Value::String(id) => {
             let id = if id.contains(':') {
                 id.to_owned()
             } else {
                 format!("minecraft:{id}")
             };
             carvers.contains_key(&id)
-        })
+        }
+        Value::Object(_) => java_type(c).is_some(),
+        _ => false,
     };
     match biome.get_mut("carvers") {
         Some(Value::Array(list)) => {
@@ -302,6 +310,10 @@ fn features(kind: &str, v: &mut Value, report: &mut Upgrade) -> bool {
     };
     for (t, n) in r.unknown {
         *report.unsupported.entry(t).or_default() += n;
+    }
+    // What the upgrade had to leave out (a carver's own `replaceable` tag).
+    for (t, n) in r.lossy {
+        *report.rules_lost.entry(t).or_default() += n;
     }
     let changed = new != *v;
     *v = new;
