@@ -66,7 +66,8 @@ pub trait LevelsBackend {
     /// structure whose start's box holds `pos`, from the starts the chunk at `pos` refers to,
     /// and whether one of its pieces holds it too. Reads the level in place or parked, loads
     /// and generates no chunks. Empty for a chunk that refers to no structure there; None
-    /// on a client, for a stale or unavailable level and for a chunk that isn't loaded.
+    /// on a client, for a stale or unavailable level, for a chunk that isn't loaded and for
+    /// one whose references the level can't resolve (a level without generated terrain).
     #[access(WorldOnly)]
     fn level_structures_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec<StructureAt>>;
     /// Side: both.

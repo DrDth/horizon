@@ -193,16 +193,19 @@ impl Game<'_> {
         pos: [i32; 3],
     ) -> Option<Vec<mod_api::StructureAt>> {
         let world = self.native_level_world(level)?;
-        world.chunks.get(&(pos[0] >> 4, pos[2] >> 4))?;
-        let locator = || {
-            if level.dimension() == self.dim.key() {
-                self.end.locator()
-            } else {
-                self.levels.parked_locator_of(level.dimension_id())
-            }
-        };
+        let chunk = world.chunks.get(&(pos[0] >> 4, pos[2] >> 4))?;
+        if chunk.structure_refs.is_empty() {
+            return Some(Vec::new());
+        }
+        // The starts behind the chunk's references come from the terrain that locates them; a
+        // level without one can't say which structures are there, which isn't "none".
+        let locator = if level.dimension() == self.dim.key() {
+            self.end.locator()
+        } else {
+            self.levels.parked_locator_of(level.dimension_id())
+        }?;
         Some(
-            super::structures::structures_reaching_in(world, &locator, pos, &|_| true)
+            super::structures::structures_reaching_in(world, &|| Some(locator.clone()), pos, &|_| true)
                 .into_iter()
                 .map(|(structure, in_piece)| mod_api::StructureAt::new(structure, in_piece))
                 .collect(),
@@ -3256,6 +3259,13 @@ mod environment_read_tests {
                 overworld.dimension(),
             );
             assert_eq!(stale.structures_at(game, in_piece), None);
+
+            game.end.set_locator(None);
+            assert_eq!(
+                overworld.structures_at(game, in_piece),
+                None,
+                "references nothing locates are unknown"
+            );
         });
     }
 
