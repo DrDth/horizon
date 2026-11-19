@@ -3052,12 +3052,14 @@ impl Game<'_> {
             self.level_event_at(3000, pos, 0);
             let _ = self.place_gateway_at(pos);
         }
-        if !self.fight.previously_killed
-            && let Some(egg) = self
-                .pack
-                .assets
-                .registry
-                .default_state("minecraft:dragon_egg")
+        // Vanilla places the egg on the first win only. Mods are asked on every win, as Paper's
+        // `DragonEggFormEvent`: cancelled from the start once the fight was won before, so a
+        // listener receiving cancelled events can still place one.
+        if let Some(egg) = self
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:dragon_egg")
         {
             let y = (0..256)
                 .rev()
@@ -3067,8 +3069,9 @@ impl Game<'_> {
                 })
                 .map_or(64, |y| y + 1);
             let pos = BlockPos::new(0, y, 0);
+            let won_before = self.fight.previously_killed;
             let allowed = self.with_level(|_, level, _| {
-                let mut cancel = false;
+                let mut cancel = won_before;
                 if level.native_authoritative {
                     level.native_dragon_egg_form(level.dimension, pos, &mut cancel);
                 }
@@ -6363,6 +6366,9 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+#[path = "dragon/egg_tests.rs"]
+mod egg_tests;
 #[cfg(test)]
 #[path = "dragon/residency_tests.rs"]
 mod residency_tests;

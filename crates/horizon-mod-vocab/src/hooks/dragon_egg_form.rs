@@ -2,8 +2,11 @@
 // catalog-order: 0194
 
 pub trait Hooks {
-    /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
-    /// Set `cancel` to leave the block unchanged. Server-side.
+    /// The Ender Dragon fight is won and a dragon egg may form at `pos`, on every win as
+    /// Paper's `DragonEggFormEvent`. Set `cancel` to leave the block unchanged. Vanilla places
+    /// the egg on the first win only: on a later one the event starts cancelled, and a
+    /// listener receiving cancelled events that sets it back places the egg anyway.
+    /// Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
