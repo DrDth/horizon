@@ -1585,6 +1585,29 @@ impl StructureSearchResult {
     }
 }
 
+/// A structure whose start's box holds a position, from `LevelRef::structures_at`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct StructureAt {
+    /// Registry id of the structure.
+    pub structure: String,
+    /// Whether one of its pieces holds the position too
+    /// (`StructureManager.getStructureWithPieceAt`), not only the start's box
+    /// (`getStructureAt`).
+    pub in_piece: bool,
+}
+
+impl StructureAt {
+    /// A structure reaching a position, and whether a piece holds it.
+    pub fn new(structure: String, in_piece: bool) -> Self {
+        Self {
+            structure,
+            in_piece,
+        }
+    }
+}
+
 /// Why a server-wide game rule read was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 #[non_exhaustive]

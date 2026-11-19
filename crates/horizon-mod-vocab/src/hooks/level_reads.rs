@@ -126,6 +126,13 @@ are all checked whatever it is. The search builds structure starts but neither l
 chunks; a world without structures, a structure this level cannot generate, an origin past the
 world's 30,000,000-block edge and a radius out of range give `None`.
 
+`structures_at(host, pos)` answers which structures a position is in: `StructureManager.getStructureAt`
+and `getStructureWithPieceAt` in one read. Each `StructureAt` names a structure whose start's box holds
+`pos`, from the starts the chunk at `pos` refers to, and `in_piece` says whether one of its pieces holds
+it too. The start's box is the box around all its pieces, so a spot between two of a village's houses
+can be in the box and in no piece. The read loads no chunks: an unloaded chunk, a client and a stale
+level give `None`, and a chunk that refers to no structure there gives an empty list.
+
 `ChunkRef::watchers(host)` is `ChunkMap.getPlayers(pos, false)`: the players the chunk was sent to
 and is inside the view of, from their `chunk_watch` until they move away from it. Horizon's
 far-ring columns past the view distance are not watched, and fake players watch nothing."#]
