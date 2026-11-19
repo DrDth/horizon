@@ -198,3 +198,33 @@ fn say_and_me_are_asked_per_receiver_and_a_whisper_is_not() {
         });
     });
 }
+
+/// `execute ... run say` is the dispatcher's, with the source and the condition `execute` set up:
+/// a failing condition says nothing, a holding one reaches the other players.
+#[test]
+#[ignore = "daily"]
+fn execute_runs_say_only_when_its_condition_holds() {
+    with_game(|game| {
+        let (sender, other) = two_guests(game);
+        lines(&sender);
+        lines(&other);
+        // The dispatcher queues a guest's command and runs it with the guests' others.
+        let run = |game: &mut super::Game<'_>, command: &str| {
+            game.guest_command(12, command, None);
+            game.run_guest_commands();
+            lines(&sender);
+            lines(&other)
+        };
+        assert_eq!(
+            run(game, "execute if entity @e[type=minecraft:pig,distance=..0] run say hidden"),
+            0,
+            "no pig there: nothing is said"
+        );
+        assert_eq!(run(game, "execute if dimension minecraft:the_end run say hidden"), 0);
+        assert_eq!(
+            run(game, "execute if dimension minecraft:overworld run say shown"),
+            1,
+            "the condition holds"
+        );
+    });
+}
