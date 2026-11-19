@@ -193,19 +193,18 @@ impl Game<'_> {
         pos: [i32; 3],
     ) -> Option<Vec<mod_api::StructureAt>> {
         let world = self.native_level_world(level)?;
-        let chunk = world.chunks.get(&(pos[0] >> 4, pos[2] >> 4))?;
-        if chunk.structure_refs.is_empty() {
-            return Some(Vec::new());
-        }
-        // The starts behind the chunk's references come from the terrain that locates them; a
-        // level without one can't say which structures are there, which isn't "none".
-        let locator = if level.dimension() == self.dim.key() {
-            self.end.locator()
-        } else {
-            self.levels.parked_locator_of(level.dimension_id())
-        }?;
+        // The starts behind the chunk's references come from the terrain that locates them, and
+        // only from those it holds: a mod's read loads no chunk and builds no start. A level that
+        // can't resolve a reference can't say which structures are there, which isn't "none".
+        let locator = || {
+            if level.dimension() == self.dim.key() {
+                self.end.locator()
+            } else {
+                self.levels.parked_locator_of(level.dimension_id())
+            }
+        };
         Some(
-            super::structures::structures_reaching_in(world, &|| Some(locator.clone()), pos, &|_| true)
+            super::structures::cached_structures_reaching_in(world, &locator, pos)?
                 .into_iter()
                 .map(|(structure, in_piece)| mod_api::StructureAt::new(structure, in_piece))
                 .collect(),
@@ -3259,6 +3258,20 @@ mod environment_read_tests {
                 overworld.dimension(),
             );
             assert_eq!(stale.structures_at(game, in_piece), None);
+
+            // A reference to starts the generator doesn't hold: unknown, and nothing is built.
+            let far = (home.0 + 4000, home.1);
+            let mut chunk = Chunk::empty(in_box[0] >> 4, in_box[2] >> 4);
+            chunk.structure_refs = vec![(Arc::from(village), far)];
+            game.world
+                .chunks
+                .insert((in_box[0] >> 4, in_box[2] >> 4), Arc::new(chunk));
+            assert!(terrain.cached_starts_at(far.0, far.1).is_none());
+            assert_eq!(overworld.structures_at(game, in_box), None);
+            assert!(
+                terrain.cached_starts_at(far.0, far.1).is_none(),
+                "the read built no start"
+            );
 
             game.end.set_locator(None);
             assert_eq!(

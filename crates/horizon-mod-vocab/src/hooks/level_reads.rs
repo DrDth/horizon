@@ -130,9 +130,11 @@ world's 30,000,000-block edge and a radius out of range give `None`.
 and `getStructureWithPieceAt` in one read. Each `StructureAt` names a structure whose start's box holds
 `pos`, from the starts the chunk at `pos` refers to, and `in_piece` says whether one of its pieces holds
 it too. The start's box is the box around all its pieces, so a spot between two of a village's houses
-can be in the box and in no piece. The read loads no chunks: an unloaded chunk, a client and a stale
-level give `None`, and so does a chunk whose references the level can't resolve, in a level without
-generated terrain. A chunk that refers to no structure there gives an empty list.
+can be in the box and in no piece; a piece that settles on the terrain (a shipwreck, an ocean ruin, an
+igloo) counts where it was placed. The read loads no chunks and builds no starts: an unloaded chunk, a
+client and a stale level give `None`, and so does a chunk whose references the level can't resolve now,
+in a level without generated terrain or to starts the generator no longer holds. A chunk that refers to
+no structure there gives an empty list.
 
 `ChunkRef::watchers(host)` is `ChunkMap.getPlayers(pos, false)`: the players the chunk was sent to
 and is inside the view of, from their `chunk_watch` until they move away from it. Horizon's
