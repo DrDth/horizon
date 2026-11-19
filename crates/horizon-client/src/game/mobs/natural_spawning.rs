@@ -950,10 +950,10 @@ impl<H: LevelHost> NaturalLevel for Level<'_, H> {
             wanted,
         )
         .into_iter()
-        .map(|(id, in_piece)| StructureAt {
-            id,
-            in_piece,
-            in_bounds: true,
+        .map(|reach| StructureAt {
+            id: reach.name,
+            in_piece: reach.in_piece,
+            in_bounds: reach.in_box,
         })
         .collect()
     }

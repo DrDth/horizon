@@ -206,7 +206,7 @@ impl Game<'_> {
         Some(
             super::structures::cached_structures_reaching_in(world, &locator, pos)?
                 .into_iter()
-                .map(|(structure, in_piece)| mod_api::StructureAt::new(structure, in_piece))
+                .map(|reach| mod_api::StructureAt::new(reach.name, reach.in_box, reach.in_piece))
                 .collect(),
         )
     }
@@ -3245,11 +3245,11 @@ mod environment_read_tests {
             refer(game, in_box);
             assert_eq!(
                 overworld.structures_at(game, in_piece),
-                Some(vec![StructureAt::new(village.to_owned(), true)])
+                Some(vec![StructureAt::new(village.to_owned(), true, true)])
             );
             assert_eq!(
                 overworld.structures_at(game, in_box),
-                Some(vec![StructureAt::new(village.to_owned(), false)])
+                Some(vec![StructureAt::new(village.to_owned(), true, false)])
             );
             let above = [in_box[0], start.bounding_box.max[1] + 1, in_box[2]];
             assert_eq!(overworld.structures_at(game, above), Some(Vec::new()));

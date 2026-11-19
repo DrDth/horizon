@@ -63,8 +63,8 @@ pub trait LevelsBackend {
     ) -> Option<StructureSearchResult>;
     /// Side: server.
     /// `StructureManager.getStructureAt` and `getStructureWithPieceAt` in one read: every
-    /// structure whose start's box holds `pos`, from the starts the chunk at `pos` refers to,
-    /// and whether one of its pieces holds it too, as placed. Reads the level in place or
+    /// structure the chunk at `pos` refers to whose start's box or one of whose pieces, as
+    /// placed, holds `pos`, with which of the two (`in_box`, `in_piece`). Reads the level in place or
     /// parked from the starts the generator holds: loads no chunk and builds no start. Empty
     /// for a chunk that refers to no structure there; None on a client, for a stale or
     /// unavailable level, for a chunk that isn't loaded and for one whose references the level

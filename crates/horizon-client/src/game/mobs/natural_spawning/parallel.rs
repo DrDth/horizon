@@ -98,8 +98,8 @@ impl FinalizeLevel for LaneFinalize<'_, '_> {
             &|_| true,
         )
         .into_iter()
-        .filter(|(_, piece)| *piece)
-        .map(|(n, _)| n)
+        .filter(|reach| reach.in_piece)
+        .map(|reach| reach.name)
         .collect()
     }
     fn moon_phase(&self, _: [i32; 3]) -> usize {

@@ -127,14 +127,13 @@ chunks; a world without structures, a structure this level cannot generate, an o
 world's 30,000,000-block edge and a radius out of range give `None`.
 
 `structures_at(host, pos)` answers which structures a position is in: `StructureManager.getStructureAt`
-and `getStructureWithPieceAt` in one read. Each `StructureAt` names a structure whose start's box holds
-`pos`, from the starts the chunk at `pos` refers to, and `in_piece` says whether one of its pieces holds
-it too. The start's box is the box around all its pieces, so a spot between two of a village's houses
-can be in the box and in no piece; a piece that settles on the terrain (a shipwreck, an ocean ruin, an
-igloo) counts where it was placed. The read loads no chunks and builds no starts: an unloaded chunk, a
-client and a stale level give `None`, and so does a chunk whose references the level can't resolve now,
-in a level without generated terrain or to starts the generator no longer holds. A chunk that refers to
-no structure there gives an empty list.
+and `getStructureWithPieceAt` in one read. Each `StructureAt` names a structure the chunk at `pos` refers to;
+`in_box` says whether its start's box holds `pos`, `in_piece` whether one of its pieces, as placed, holds it.
+The start's box is the box around all its pieces as they were made, so a spot between two of a village's
+houses can be in the box and in no piece, and a shipwreck that settled below that box holds blocks in no box.
+The read loads no chunks and builds no starts: an unloaded chunk, a client and a stale level give `None`, and
+so does a chunk whose references the level can't resolve now, in a level without generated terrain or to
+starts the generator no longer holds. A chunk that refers to no structure there gives an empty list.
 
 `ChunkRef::watchers(host)` is `ChunkMap.getPlayers(pos, false)`: the players the chunk was sent to
 and is inside the view of, from their `chunk_watch` until they move away from it. Horizon's
