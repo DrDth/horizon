@@ -463,9 +463,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   the block grown into for kelp and vines). Vanilla's random roll is drawn first, in vanilla's order, and passed as
   the default, so crops keep vanilla's random sequence. Pitcher crops, bamboo saplings and mangrove propagules
   don't fire.
-- **`dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the Ender Dragon fight is won and an egg may
-  form at `pos`. Set `cancel` to leave the block unchanged. On a later win it starts cancelled, as vanilla places
-  the first egg only; a listener receiving cancelled events that clears it places one anyway.
+- **`dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
+  its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
   at `pos` is about to change level. Levels run from 0 through 8. Set `cancel` to keep the old level.
 - **`neighbor_notify(dimension, pos, state, skipped_side, cancel)`** (on `GameLevel`): NeoForge's
@@ -2458,7 +2457,7 @@ registration path.
 
 - Lightning struck a creeper and set its charged state; the hook reports the creeper id and strike position.
 
-- The Ender Dragon fight is won and an egg may form at `pos`: `dragon_egg_form(dimension, pos, cancel)` runs on `GameLevel` on every win. Set `cancel` to leave the block unchanged; on a later win it starts cancelled, and a listener receiving cancelled events that clears it places an egg anyway.
+- The first Ender Dragon fight is about to place its egg at `pos`: `dragon_egg_form(dimension, pos, cancel)` runs on `GameLevel`. Set `cancel` to leave the block unchanged.
 
 - A player applied an enchantment: `enchant_item(player, name, pos, item, levels)` is heard after the player at `pos` applied it, with the finished `item` and levels charged. The guest's state is not swapped in.
 
