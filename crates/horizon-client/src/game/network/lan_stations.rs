@@ -131,6 +131,7 @@ impl Game<'_> {
                     menu.set_slot(env, slot, stack);
                 }
             });
+            self.lan_station_created(gi, station_kind, pos, &mut menu, true, false);
         }
         if let Some(host) = self.lan.as_mut() {
             *host.menus.entry(conn).or_default().station = Some(GuestStation {
@@ -146,6 +147,63 @@ impl Game<'_> {
         self.lan_send_station(conn);
         self.player_menu_opening(conn);
         Some(Some(window))
+    }
+
+    /// The mods' say on a station's result once createResult ran on guest `gi`'s `menu`:
+    /// `AnvilUpdateEvent`, `GrindstoneEvent.OnPlaceItem` and `PrepareSmithing`. After a
+    /// click that changed the inputs (`recomputed`) and not after a cancelled take, and on a
+    /// station a mod opened with inputs.
+    fn lan_station_created(
+        &mut self,
+        gi: usize,
+        kind: StationKind,
+        pos: [i32; 3],
+        menu: &mut Menu,
+        recomputed: bool,
+        cancelled: bool,
+    ) {
+        // AnvilUpdateEvent after createResult; a cancelled take's undo
+        // is no createResult.
+        let anvil_created =
+            kind == StationKind::Anvil && menu.anvil_created() && !cancelled;
+        if anvil_created
+            && mod_api::__private::listened(mod_api::HookId::AnvilUpdate)
+            && let Some(mut update) = menu.anvil_update()
+        {
+            let (uuid, entity_id) = self
+                .lan
+                .as_ref()
+                .map(|host| (host.hub.guests[gi].uuid, host.hub.guests[gi].entity_id))
+                .unwrap_or((0, 0));
+            let mut cancel = false;
+            self.api_anvil_update(uuid, entity_id, pos, &mut update, &mut cancel);
+            menu.anvil_updated(update, cancel);
+        }
+        if recomputed && kind == StationKind::Grindstone && menu.grind_hook {
+            let (uuid, entity_id) = self
+                .lan
+                .as_ref()
+                .map(|host| (host.hub.guests[gi].uuid, host.hub.guests[gi].entity_id))
+                .unwrap_or((0, 0));
+            let mut place = menu.grindstone_place();
+            let mut cancel = false;
+            self.api_grindstone_place(uuid, entity_id, pos, &mut place, &mut cancel);
+            menu.grindstone_placed(place, cancel);
+        }
+        if recomputed && kind == StationKind::Smithing {
+            let (uuid, name) = self
+                .lan
+                .as_ref()
+                .map(|host| {
+                    let guest = &host.hub.guests[gi];
+                    (guest.uuid, guest.name.clone())
+                })
+                .unwrap_or((0, String::new()));
+            let mut result = menu.slot(3).cloned();
+            self.native_prepare_smithing(uuid, &name, pos, &mut result);
+            let env = self.menu_env();
+            menu.set_slot(&env, 3, result);
+        }
     }
 
     /// Runs `op` on the guest's open station (window `window`, any when
@@ -255,48 +313,7 @@ impl Game<'_> {
                             .enumerate()
                             .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
                 });
-            // AnvilUpdateEvent after createResult; a cancelled take's undo
-            // is no createResult.
-            let anvil_created =
-                gs.kind == StationKind::Anvil && gs.menu.anvil_created() && !cancelled;
-            if anvil_created
-                && mod_api::__private::listened(mod_api::HookId::AnvilUpdate)
-                && let Some(mut update) = gs.menu.anvil_update()
-            {
-                let (uuid, entity_id) = self
-                    .lan
-                    .as_ref()
-                    .map(|host| (host.hub.guests[gi].uuid, host.hub.guests[gi].entity_id))
-                    .unwrap_or((0, 0));
-                let mut cancel = false;
-                self.api_anvil_update(uuid, entity_id, gs.pos, &mut update, &mut cancel);
-                gs.menu.anvil_updated(update, cancel);
-            }
-            if recomputed && gs.kind == StationKind::Grindstone && gs.menu.grind_hook {
-                let (uuid, entity_id) = self
-                    .lan
-                    .as_ref()
-                    .map(|host| (host.hub.guests[gi].uuid, host.hub.guests[gi].entity_id))
-                    .unwrap_or((0, 0));
-                let mut place = gs.menu.grindstone_place();
-                let mut cancel = false;
-                self.api_grindstone_place(uuid, entity_id, gs.pos, &mut place, &mut cancel);
-                gs.menu.grindstone_placed(place, cancel);
-            }
-            if recomputed && gs.kind == StationKind::Smithing {
-                let (uuid, name) = self
-                    .lan
-                    .as_ref()
-                    .map(|host| {
-                        let guest = &host.hub.guests[gi];
-                        (guest.uuid, guest.name.clone())
-                    })
-                    .unwrap_or((0, String::new()));
-                let mut result = gs.menu.slot(3).cloned();
-                self.native_prepare_smithing(uuid, &name, gs.pos, &mut result);
-                let env = self.menu_env();
-                gs.menu.set_slot(&env, 3, result);
-            }
+            self.lan_station_created(gi, gs.kind, gs.pos, &mut gs.menu, recomputed, cancelled);
             self.lan_station_sounds(&mut gs);
             if let Some(amount) = gs.menu.ground.take() {
                 self.grindstone_taken(gs.pos, amount);

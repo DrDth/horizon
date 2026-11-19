@@ -9,7 +9,9 @@ use horizon_protocol::{
     buf::Reader,
     packets::play::{Clientbound as C, ContainerClose},
 };
-use mod_api::{Hooks, ServerHost, StationClosingEvent};
+use mod_api::{
+    Hooks, PrepareItemCraftEvent, PrepareSmithingEvent, ServerHost, StationClosingEvent,
+};
 use std::sync::{Arc, Mutex, mpsc};
 
 /// Guest 1 (UUID 123) carrying a stick, on a world open to LAN, and what their client is sent.
@@ -129,5 +131,79 @@ fn a_table_with_no_block_keeps_to_its_item_and_lets_the_mods_keep_its_grid() {
             .map(|s| s.count)
             .sum();
         assert_eq!(planks, 3);
+    });
+}
+
+/// A table or station a mod opens with inputs shows the result the mods prepare for them, as
+/// after a click, and a player who leaves with one open gets its inputs back without the
+/// mods' say: `station_closing` is for a live close.
+#[test]
+#[ignore = "daily"]
+fn a_station_opened_with_inputs_is_prepared_and_a_leaving_player_asks_no_mod() {
+    const CASE: &str = "HORIZON_PORTABLE_PREPARE_CHILD";
+    if run_fresh_cases(
+        "game::native_stations_tests::a_station_opened_with_inputs_is_prepared_and_a_leaving_player_asks_no_mod",
+        CASE,
+        &["prepare"],
+    ) {
+        return;
+    }
+    static CLOSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    struct Prepare;
+    #[mod_api::__subscriptions]
+    impl Hooks for Prepare {
+        fn prepare_item_craft(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &mut PrepareItemCraftEvent<'_>,
+        ) -> Option<mod_api::ItemStack> {
+            mod_api::ItemStack::new(mod_api::__private::item_key("minecraft:diamond")?, 1)
+        }
+        fn prepare_smithing(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &mut PrepareSmithingEvent<'_>,
+        ) -> Option<mod_api::ItemStack> {
+            mod_api::ItemStack::new(mod_api::__private::item_key("minecraft:emerald")?, 1)
+        }
+        fn station_closing(&self, _: &mut dyn ServerHost, event: &mut StationClosingEvent<'_>) {
+            CLOSED.lock().unwrap().push(event.menu.to_owned());
+        }
+    }
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("prepare", Box::new(Prepare))].into();
+    mod_platform::__private::install(mods.clone());
+    crate::game::api_values::install_parts(&mods).unwrap();
+    with_game(|game| {
+        let _rx = stick_guest(game);
+        let player = game.player(123).unwrap();
+        let stick = mod_api::__private::item_key("minecraft:stick").unwrap();
+        // No recipe takes one dirt: the result is the mods'.
+        let dirt = Some(ItemStack::new("minecraft:dirt", 1));
+        let crafting = menu_key("minecraft:crafting");
+        game.player_open_station(player, crafting, vec![dirt.clone()], vec![stick])
+            .unwrap()
+            .unwrap();
+        let menus = game.lan.as_ref().unwrap().menus.get(&1).unwrap();
+        let (_, _, table, _) = menus.crafting.table.as_ref().unwrap();
+        assert_eq!(table.slot(0).map(|s| &*s.item), Some("minecraft:diamond"));
+        // Opening the smithing table closes the crafting table, live.
+        let smithing = menu_key("minecraft:smithing");
+        game.player_open_station(player, smithing, vec![None, dirt, None], vec![stick])
+            .unwrap()
+            .unwrap();
+        let menus = game.lan.as_ref().unwrap().menus.get(&1).unwrap();
+        let station = menus.station.as_ref().unwrap();
+        assert_eq!(station.menu.slot(3).map(|s| &*s.item), Some("minecraft:emerald"));
+
+        game.guest_disconnected(1);
+        assert_eq!(*CLOSED.lock().unwrap(), ["minecraft:crafting"]);
+        let dirt: u32 = game.lan.as_ref().unwrap().hub.guests[0]
+            .inventory
+            .iter()
+            .flatten()
+            .filter(|s| &*s.item == "minecraft:dirt")
+            .map(|s| s.count)
+            .sum();
+        assert_eq!(dirt, 2, "both inputs went back");
     });
 }

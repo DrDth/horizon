@@ -455,6 +455,12 @@ impl Game<'_> {
         if removal == MenuRemoval::Disconnected {
             self.lan_crafting_removed(conn, Some(0), removal);
         }
+        if removal == MenuRemoval::Disconnected {
+            // Leaving: the inputs go back without the mods' say (`station_closing`).
+            if let Some(menus) = self.lan.as_mut().and_then(|host| host.menus.get_mut(&conn)) {
+                menus.portable = None;
+            }
+        }
         self.lan_station_closed(conn, None);
         self.lan_mount_closed(conn, None);
         if removal == MenuRemoval::Live {

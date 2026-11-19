@@ -1098,6 +1098,13 @@ impl Game<'_> {
                     menu.set_slot(env, slot, stack);
                 }
             });
+            // The mods have their say on the restored grid's result, as after a click.
+            let guest = &self.lan.as_ref()?.hub.guests[gi];
+            let (uuid, name) = (guest.uuid, guest.name.clone());
+            let mut result = menu.slot(0).cloned();
+            self.native_prepare_item_craft(uuid, &name, Some(pos), &mut result);
+            let env = self.menu_env();
+            menu.set_slot(&env, 0, result);
         }
         let host = self.lan.as_mut()?;
         *host.menus.entry(conn).or_default().crafting.table = Some((window, 0, menu, pos));
