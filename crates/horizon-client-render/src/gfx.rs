@@ -1928,7 +1928,6 @@ pub(crate) fn sprite_split() -> u32 {
     requested_split().unwrap_or(SPRITE_SPLIT)
 }
 /// [`layer_split_in`] for terrain.wgsl's first [`SPRITE_ARRAYS`] arrays.
-#[cfg(test)]
 fn layer_split(
     max_layers: u32,
     gl: bool,
