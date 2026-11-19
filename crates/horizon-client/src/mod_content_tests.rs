@@ -773,6 +773,57 @@ fn creative_tabs_keep_vanilla_items_missing_from_search() {
     );
 }
 
+/// A mod item that declares its `item_name` gets no English search line: the search tab
+/// reads its name at run time. One that doesn't is searched by its lang file's name.
+#[test]
+fn a_declared_item_name_leaves_the_search_line_to_run_time() {
+    let item = |id: &str, components: Vec<(String, J)>| NewItem {
+        rename: Rename::new("minecraft:stick", id),
+        max_stack_size: None,
+        rarity: None,
+        components,
+        crafting_remainder: None,
+        block: None,
+        arm_pose: None,
+        wall_block: None,
+        template: Some("minecraft:stick".into()),
+    };
+    let name: J = serde_json::from_str(
+        r#"{"translate": "item.sticks.table", "with": [{"text": "Table"}]}"#,
+    )
+    .unwrap();
+    let plan = Plan {
+        blocks: Vec::new(),
+        items: vec![
+            item("sticks:table", vec![("minecraft:item_name".into(), name)]),
+            item("sticks:plain", Vec::new()),
+        ],
+        vanilla_items: BTreeSet::new(),
+        effects: Vec::new(),
+        fluids: Vec::new(),
+        entity_types: Vec::new(),
+        block_entity_types: Vec::new(),
+        block_entity_factories: BTreeMap::new(),
+        menu_types: Vec::new(),
+        states: 0,
+        defaults: BTreeMap::new(),
+        sounds: BTreeMap::new(),
+        tabs: Vec::new(),
+        names: [
+            ("item.sticks.table".to_owned(), "%s".to_owned()),
+            ("item.sticks.plain".to_owned(), "Plain Stick".to_owned()),
+        ]
+        .into(),
+    };
+    let mut doc: J = serde_json::from_str(
+        r#"{"tabs":[{"type":"SEARCH","items":[],"lines":[],"tags":[]}]}"#,
+    )
+    .unwrap();
+    plan.creative_tabs(&mut doc).unwrap();
+    let doc: serde_json::Value = serde_json::to_value(doc).unwrap();
+    assert_eq!(doc["tabs"][0]["lines"], serde_json::json!([[], ["Plain Stick"]]));
+}
+
 /// A block item's patch goes over its template block's item, and a type no
 /// vanilla item has fails the build.
 #[test]

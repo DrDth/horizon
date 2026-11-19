@@ -2206,15 +2206,21 @@ impl<'a> Plan<'a> {
                     .cloned()
                     .unwrap_or_else(|| path.to_owned())
             };
+            // An item that declares its `item_name` is searched by that name in the selected
+            // language (`Names::item` reads it at run time): no English line for it here.
+            let declares_name = |id: &str| {
+                self.items.iter().any(|i| {
+                    i.rename.to == id && i.components.iter().any(|(k, _)| k == "minecraft:item_name")
+                })
+            };
+            let line = |id: &str| match declares_name(id) {
+                true => J::Arr(Vec::new()),
+                false => J::Arr(vec![J::Str(name(id))]),
+            };
             let tab = &mut tabs[search];
             for (key, add) in [
                 ("items", new.iter().map(|id| stack(id)).collect::<Vec<_>>()),
-                (
-                    "lines",
-                    new.iter()
-                        .map(|id| J::Arr(vec![J::Str(name(id))]))
-                        .collect(),
-                ),
+                ("lines", new.iter().map(|id| line(id)).collect()),
                 // shortcut: a mod item's tags aren't searched by (#tag) yet.
                 ("tags", new.iter().map(|_| J::Arr(Vec::new())).collect()),
             ] {
