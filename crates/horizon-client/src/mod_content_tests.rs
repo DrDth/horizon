@@ -2039,8 +2039,8 @@ fn additions_append_by_priority_then_order_and_skip_unknown_targets() {
 }
 
 /// A mod's own carver joins the carvers bundle, so a biome of the mod that
-/// names it finds it. One of a type the world can't decode is left out, and
-/// out of the mod's biomes, so the world still opens.
+/// names it finds it. One of a type the world can't decode, or whose load
+/// conditions fail, is left out and listed for the worldgen loader.
 #[test]
 #[ignore = "daily"]
 fn content_root_carries_a_mods_carver() {
@@ -2055,8 +2055,13 @@ fn content_root_carries_a_mods_carver() {
     let biomes: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(base.join("worldgen/biomes.json")).unwrap()).unwrap();
     let mut hollow: serde_json::Value = serde_json::from_str(&biomes["minecraft:plains"]).unwrap();
-    hollow["carvers"] = serde_json::json!(["hollows:deep_cave", "hollows:vent"]);
+    let named = serde_json::json!(["hollows:deep_cave", "hollows:vent", "hollows:gated"]);
+    hollow["carvers"] = named.clone();
     let hollow = hollow.to_string();
+    let mut gated: serde_json::Value = serde_json::from_str(&vanilla["minecraft:cave"]).unwrap();
+    gated["neoforge:conditions"] =
+        serde_json::json!([{"type": "neoforge:mod_loaded", "modid": "absent"}]);
+    let gated = gated.to_string();
     let files = [
         (
             "horizon-mod.toml",
@@ -2072,6 +2077,8 @@ fn content_root_carries_a_mods_carver() {
             "data/hollows/worldgen/carver/vent.json",
             r#"{"type": "hollows:vent", "config": {"probability": 0.1}}"#,
         ),
+        // A cave carver only for when a mod nobody loads is there.
+        ("data/hollows/worldgen/carver/gated.json", gated.as_str()),
         ("data/hollows/worldgen/biome/hollow.json", hollow.as_str()),
     ];
     for (name, text) in files {
@@ -2097,10 +2104,17 @@ fn content_root_carries_a_mods_carver() {
     assert_eq!(carvers["hollows:deep_cave"], vanilla["minecraft:cave"]);
     assert!(carvers.contains_key("minecraft:cave"));
     assert!(!carvers.contains_key("hollows:vent"));
+    assert!(!carvers.contains_key("hollows:gated"));
+    // The biome keeps every name: the worldgen loader drops the left-out ones
+    // after a world's data packs are in, unless one supplies them.
     let biomes: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(root.join("worldgen/biomes.json")).unwrap()).unwrap();
     let hollow: serde_json::Value = serde_json::from_str(&biomes["hollows:hollow"]).unwrap();
-    assert_eq!(hollow["carvers"], serde_json::json!(["hollows:deep_cave"]));
+    assert_eq!(hollow["carvers"], named);
+    let left_out: Vec<String> =
+        serde_json::from_slice(&fs::read(root.join("worldgen/carvers_left_out.json")).unwrap())
+            .unwrap();
+    assert_eq!(left_out, ["hollows:gated", "hollows:vent"]);
     let _ = fs::remove_dir_all(&scratch);
 }
 
