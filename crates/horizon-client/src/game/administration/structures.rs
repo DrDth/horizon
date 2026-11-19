@@ -18,8 +18,8 @@ pub(super) struct Reach {
 }
 
 impl Game<'_> {
-    /// Structures reaching `pos`, by either read.
-    pub(super) fn structures_reaching(&self, pos: [i32; 3]) -> Vec<Reach> {
+    /// Structures reaching `pos` by either read ([`Reach`]): (id, inside a piece as placed).
+    pub(super) fn structures_reaching(&self, pos: [i32; 3]) -> Vec<(String, bool)> {
         self.structures_reaching_where(pos, &|_| true)
     }
     /// The same, for the structures whose id `wanted` takes: the others'
@@ -28,25 +28,39 @@ impl Game<'_> {
         &self,
         pos: [i32; 3],
         wanted: &dyn Fn(&str) -> bool,
-    ) -> Vec<Reach> {
+    ) -> Vec<(String, bool)> {
         structures_reaching_in(&self.world, &|| self.end.locator(), pos, wanted)
     }
     /// The structures with a piece containing `pos` (`getStructureWithPieceAt`).
     pub(super) fn structures_at(&self, pos: [i32; 3]) -> Vec<String> {
         self.structures_reaching(pos)
             .into_iter()
-            .filter(|reach| reach.in_piece)
-            .map(|reach| reach.name)
+            .filter(|(_, piece)| *piece)
+            .map(|(n, _)| n)
             .collect()
     }
 }
 
 type Locator<'a> = &'a dyn Fn() -> Option<Arc<horizon_client::vanillagen::VanillaTerrain>>;
 
-/// [`Game::structures_reaching_where`] over what it reads: the world's chunks and, asked only
-/// when a chunk refers to a structure, the terrain that locates the starts. A start the
-/// generator no longer holds is built again, as vanilla's `getChunk(STRUCTURE_STARTS)` loads it.
+/// [`Game::structures_reaching_where`] over what it reads: [`reaches_in`] as (id, inside a
+/// piece as placed).
 pub(super) fn structures_reaching_in(
+    world: &horizon_client::world::World,
+    locator: Locator<'_>,
+    pos: [i32; 3],
+    wanted: &dyn Fn(&str) -> bool,
+) -> Vec<(String, bool)> {
+    reaches_in(world, locator, pos, wanted)
+        .into_iter()
+        .map(|reach| (reach.name, reach.in_piece))
+        .collect()
+}
+
+/// The structures reaching `pos` by either read, from the world's chunks and, asked only when a
+/// chunk refers to a structure, the terrain that locates the starts. A start the generator no
+/// longer holds is built again, as vanilla's `getChunk(STRUCTURE_STARTS)` loads it.
+pub(super) fn reaches_in(
     world: &horizon_client::world::World,
     locator: Locator<'_>,
     pos: [i32; 3],

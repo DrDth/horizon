@@ -4,7 +4,7 @@
 use super::{
     Dim, Game,
     creatures::Finalized,
-    structures::structures_reaching_in,
+    structures::reaches_in,
 };
 use horizon_client::vanillagen::VanillaTerrain;
 use horizon_client::{
@@ -943,7 +943,7 @@ impl<H: LevelHost> NaturalLevel for Level<'_, H> {
         z: i32,
         wanted: &dyn Fn(&str) -> bool,
     ) -> Vec<StructureAt> {
-        structures_reaching_in(
+        reaches_in(
             self.w.world,
             &|| self.host.locator.clone(),
             [x, y, z],

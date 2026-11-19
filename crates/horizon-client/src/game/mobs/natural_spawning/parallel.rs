@@ -3,6 +3,7 @@
 //! them, and the server thread then commits what they proposed in the pass's chunk order.
 use super::*;
 use crate::game::creatures::prep;
+use crate::game::structures::structures_reaching_in;
 use horizon_client::mobs::{
     finalize::{self, FinalizeLevel},
     spawn_selection::{self, Lane, Pack},
@@ -98,8 +99,8 @@ impl FinalizeLevel for LaneFinalize<'_, '_> {
             &|_| true,
         )
         .into_iter()
-        .filter(|reach| reach.in_piece)
-        .map(|reach| reach.name)
+        .filter(|(_, piece)| *piece)
+        .map(|(n, _)| n)
         .collect()
     }
     fn moon_phase(&self, _: [i32; 3]) -> usize {
