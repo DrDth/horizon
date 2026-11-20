@@ -115,11 +115,8 @@ impl GameLevel<'_> {
         self.fire_block_form(dimension, pos, from, to, cancel);
     }
 
-    /// The Ender Dragon fight is won and a dragon egg may form at `pos`, on every win as
-    /// Paper's `DragonEggFormEvent`. Set `cancel` to leave the block unchanged. Vanilla places
-    /// the egg on the first win only: on a later one the event starts cancelled, and a
-    /// listener receiving cancelled events that sets it back places the egg anyway.
-    /// Server-side.
+    /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
+    /// Set `cancel` to leave the block unchanged. Server-side.
     #[inline(always)]
     pub(in crate::game) fn native_dragon_egg_form(
         &self,
@@ -128,6 +125,21 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         self.fire_dragon_egg_form(dimension, pos, cancel);
+    }
+
+    /// The Ender Dragon fight is won, on every win: `pos` is where its egg forms, `won_before`
+    /// whether the fight was won before, `forms` whether an egg forms unless a mod answers.
+    /// A mod's answer in `egg` places one or leaves the block. Server-side.
+    #[inline(always)]
+    pub(in crate::game) fn native_dragon_fight_won(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        won_before: bool,
+        forms: bool,
+        egg: &mut Option<bool>,
+    ) {
+        self.fire_dragon_fight_won(dimension, pos, won_before, forms, egg);
     }
 
     /// An authoritative server is about to deliver `neighborChanged`.

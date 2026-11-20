@@ -3052,9 +3052,6 @@ impl Game<'_> {
             self.level_event_at(3000, pos, 0);
             let _ = self.place_gateway_at(pos);
         }
-        // Vanilla places the egg on the first win only. Mods are asked on every win, as Paper's
-        // `DragonEggFormEvent`: cancelled from the start once the fight was won before, so a
-        // listener receiving cancelled events can still place one.
         if let Some(egg) = self
             .pack
             .assets
@@ -3071,11 +3068,20 @@ impl Game<'_> {
             let pos = BlockPos::new(0, y, 0);
             let won_before = self.fight.previously_killed;
             let allowed = self.with_level(|_, level, _| {
-                let mut cancel = won_before;
+                // Vanilla's egg, on the first win only, which `dragon_egg_form` may cancel;
+                // then `dragon_fight_won`, asked on every win, may place one or leave it.
+                let mut forms = !won_before;
                 if level.native_authoritative {
-                    level.native_dragon_egg_form(level.dimension, pos, &mut cancel);
+                    if forms {
+                        let mut cancel = false;
+                        level.native_dragon_egg_form(level.dimension, pos, &mut cancel);
+                        forms = !cancel;
+                    }
+                    let mut egg = None;
+                    level.native_dragon_fight_won(level.dimension, pos, won_before, forms, &mut egg);
+                    forms = egg.unwrap_or(forms);
                 }
-                !cancel
+                forms
             });
             if allowed {
                 let _ = self.level_set([0, y, 0], egg);
