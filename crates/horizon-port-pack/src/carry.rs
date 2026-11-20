@@ -1840,7 +1840,8 @@ pub fn carry(
         let merged = match fs::read(&file) {
             Err(_) => Some(loader),
             Ok(bytes) => {
-                let Ok(mut own) = serde_json::from_slice::<Value>(&bytes) else {
+                // A file that isn't a tag object is left as the mod ships it.
+                let Ok(mut own @ Value::Object(_)) = serde_json::from_slice::<Value>(&bytes) else {
                     continue;
                 };
                 if own["replace"].as_bool() == Some(true) {
@@ -3610,7 +3611,7 @@ mod tests {
                 (
                     "data/example/recipe/press.json",
                     br##"{"type": "minecraft:crafting_shapeless", "ingredients": ["#c:dusts",
-                        "#c:ingots/copper", "#c:chains", "#c:gems/diamond"],
+                        "#c:ingots/copper", "#c:chains", "#c:gems/diamond", "#c:rods/wooden"],
                         "result": {"id": "example:press"}}"##,
                 ),
                 (
@@ -3620,6 +3621,10 @@ mod tests {
                 (
                     "data/c/tags/item/gems/diamond.json",
                     br##"{"replace": true, "values": ["example:diamond"]}"##,
+                ),
+                (
+                    "data/c/tags/item/rods/wooden.json",
+                    br##"["example:stick"]"##,
                 ),
             ],
         );
@@ -3641,6 +3646,10 @@ mod tests {
                 json!({"values": ["minecraft:copper_ingot"]}),
             ),
             ("chains".to_owned(), json!({"values": ["minecraft:chain"]})),
+            (
+                "rods/wooden".to_owned(),
+                json!({"values": ["minecraft:stick"]}),
+            ),
             (
                 "gems/diamond".to_owned(),
                 json!({"values": ["minecraft:diamond"]}),
@@ -3683,6 +3692,11 @@ mod tests {
             "the mod's own members, then the loader's"
         );
         assert_eq!(tag("chains"), json!({"values": ["minecraft:iron_chain"]}));
+        assert_eq!(
+            fs::read(tags.join("rods/wooden.json")).unwrap(),
+            br##"["example:stick"]"##,
+            "a file that isn't a tag object is the mod's as shipped"
+        );
         assert_eq!(
             tag("gems/diamond"),
             json!({"replace": true, "values": ["example:diamond"]}),
