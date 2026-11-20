@@ -899,7 +899,8 @@ mod tests {
     }
 
     /// `LevelRef::remove_block_entity`: the chest's block entity goes and its block stays; an
-    /// aborted transaction puts it back with its items, and an end gateway's with its beam.
+    /// aborted transaction puts it back with its items and identity, unless a block set in the
+    /// transaction took its place, and an end gateway's with its beam.
     #[test]
     #[ignore = "daily"]
     fn removing_a_block_entity_keeps_its_block() {
@@ -937,6 +938,42 @@ mod tests {
                 game.world.block_entities.get(&(1, 64, 1)),
                 Some(BlockEntity::Chest(items)) if items[0].as_ref().is_some_and(|s| s.count == 3)
             ));
+
+            // Removed and put back time and again, it keeps its identity.
+            let generation = game.world.block_entities.generation(&(1, 64, 1));
+            for _ in 0..3 {
+                let _: Result<(), ()> = game.transaction(|game, _| {
+                    assert!(game.level_remove_block_entity(level, pos));
+                    Err(())
+                });
+            }
+            assert_eq!(game.world.block_entities.generation(&(1, 64, 1)), generation);
+
+            // A block a mod set over it in the transaction stays, without the chest under it.
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            let _: Result<(), ()> = game.transaction(|game, _| {
+                assert!(game.level_remove_block_entity(level, pos));
+                assert_eq!(
+                    game.level_set_block(level, pos, stone, mod_api::BlockUpdateFlags::NONE),
+                    Ok(true)
+                );
+                Err(())
+            });
+            assert_eq!(game.world.block(1, 64, 1), stone);
+            assert!(game.world.block_entities.get(&(1, 64, 1)).is_none());
+            assert!(!game.world.block_names.contains_key(&(1, 64, 1)));
+            game.world.set(1, 64, 1, chest).unwrap();
+            game.world
+                .block_entities
+                .insert((1, 64, 1), BlockEntity::Chest(vec![None; 27]));
+            game.world
+                .block_names
+                .insert((1, 64, 1), Tag::String("Loot".into()));
 
             assert!(game.level_remove_block_entity(level, pos));
             assert!(game.block_entity(level, pos).is_none());

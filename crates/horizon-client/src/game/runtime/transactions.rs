@@ -28,6 +28,7 @@
 //! commit, and mods hear of joins and leaves at the root commit (`transactions/entities.rs`).
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::block_entity_anim::EndGateway;
+use horizon_client_render::block_entities::TickerRegistration;
 use horizon_client::fast_hash::FxHashMap;
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_mod_runtime::attachments::{Attachments, Holder};
@@ -188,6 +189,11 @@ struct Kept {
     /// An end gateway's beam age and teleport cooldown, kept beside the model
     /// (`BeAnims::gateway_servers`).
     gateway: Option<EndGateway>,
+    /// Its ticker as it stood, for an abort to put back.
+    ticker: TickerRegistration,
+    /// The block state at its position: an abort puts the block entity back only over the
+    /// same block.
+    block: BlockStateId,
 }
 
 impl Kept {
@@ -205,6 +211,8 @@ impl Kept {
             name: world.block_names.get(&pos).cloned(),
             extras: world.block_entity_extras(pos),
             gateway: gateways.get(&[pos.0, pos.1, pos.2]).copied(),
+            ticker: world.block_entities.ticker_registration(&pos),
+            block: world.block(pos.0, pos.1, pos.2),
         }
     }
 }
@@ -659,21 +667,27 @@ impl Game<'_> {
             });
     }
     /// Puts back the block entity at `pos` that a transaction removed, as `kept` holds it, with
-    /// its generation, where none stands there now.
+    /// its generation and ticker, where none stands there now.
     fn restore_removed_block_entity(&mut self, pos: Pos, kept: &Kept) {
-        let Some(entity) = &kept.entity else {
+        let (Some(entity), Some(generation)) = (&kept.entity, kept.generation) else {
             return;
         };
         if self.world.block_entities.get(&pos).is_some() {
             return;
         }
-        self.world.block_entities.insert(pos, entity.clone());
-        if let Some(generation) = kept.generation {
-            self.world
-                .block_entities
-                .restore_generation(pos, generation);
-            self.world.block_entities.reattach_retired(pos, generation);
-        }
+        self.world
+            .block_entities
+            .restore_removed(pos, entity.clone(), generation, kept.ticker);
+        self.world.block_entities.reattach_retired(pos, generation);
+    }
+    /// Whether `a` and `b` are states of one block (`BlockState.is(Block)`).
+    fn same_block(&self, a: BlockStateId, b: BlockStateId) -> bool {
+        let registry = &self.pack.assets.registry;
+        a == b
+            || matches!(
+                (registry.state(a), registry.state(b)),
+                (Some(a), Some(b)) if a.name == b.name
+            )
     }
     /// Removes the block entity at `pos`, kept whole by the open transaction, which puts it back
     /// if it aborts: a block write in the transaction that drops it, so later reads in it see
@@ -1123,6 +1137,16 @@ impl Game<'_> {
         }
 
         for (pos, kept) in level.block_entities {
+            // A block write the transaction doesn't keep (`LevelRef::set_block` stores at once)
+            // put another block there: the old block entity and what it kept stay gone, as
+            // vanilla's `setBlock` drops a block entity its new block can't hold.
+            let block = match level.blocks.get(&pos) {
+                Some(&kept_block) => kept_block,
+                None => self.world.block(pos.0, pos.1, pos.2),
+            };
+            if kept.entity.is_some() && !self.same_block(kept.block, block) {
+                continue;
+            }
             match (&kept.entity, self.world.block_entities.get_mut(&pos)) {
                 (Some(entity), Some(now)) => {
                     *now = entity.clone();
