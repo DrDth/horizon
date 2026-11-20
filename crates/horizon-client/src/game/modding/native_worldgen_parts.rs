@@ -59,17 +59,22 @@ pub(in crate::game) fn with_host<R>(
         let set = super::native_hooks::with_property(registry, engine, key, value)?;
         index.to_api(set).ok()
     };
-    let block_in_tag = |block: BlockKey, tag: &str| {
-        let (_, _, tags) = published.as_ref()?;
-        let tag = horizon_client::command::args::normalized(tag);
-        Some(tags.get(tag.as_ref()).is_some_and(|set| set.contains(&block)))
-    };
+    let block_in_tag = |block: BlockKey, tag: &str| block_in_tag(block, tag);
     Some(f(&mod_api::OwningWorldgen::new(
         &registries,
         &setting,
         &state_with_property,
     )
     .with_block_in_tag(&block_in_tag)))
+}
+
+/// `BlockState.is(TagKey)` over the merged block tags the server published last: whether
+/// `block` is in `tag` (a tag without a namespace is vanilla's). An unknown tag is false; None
+/// before a server published its tags.
+pub(in crate::game) fn block_in_tag(block: BlockKey, tag: &str) -> Option<bool> {
+    let (_, _, tags) = published()?;
+    let tag = horizon_client::command::args::normalized(tag);
+    Some(tags.get(tag.as_ref()).is_some_and(|set| set.contains(&block)))
 }
 
 /// The engine's feature callback: one feature's Part lookups read the tables published when it
