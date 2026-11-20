@@ -1113,8 +1113,14 @@ impl Game<'_> {
         Some(window)
     }
 
-    /// A click on the guest's crafting table window; false for other windows.
+    /// A click on the guest's crafting table window; false for other windows. The table is out
+    /// of the guest's menus while the mods are asked about its result, so it is busy: a hook
+    /// can't open a station in its place.
     pub(super) fn lan_crafting_click(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
+        self.with_station_busy(conn, |game| game.lan_crafting_click_busy(conn, p))
+    }
+
+    fn lan_crafting_click_busy(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
         let Some(host) = self.lan.as_mut() else {
             return false;
         };

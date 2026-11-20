@@ -1231,9 +1231,9 @@ pub enum OpenStationError {
     PlayerUnavailable,
     /// More `inputs` than the station has input slots.
     TooManyInputs,
-    /// A station is being opened for the player already: a listener of that opening
-    /// (`prepare_item_craft` on the restored grid...) can't open another in its place.
-    Opening,
+    /// The player's station is asking the mods already, while it opens or takes a click: a
+    /// listener there (`prepare_item_craft`, `anvil_update`...) can't open another in its place.
+    Busy,
     /// One of the inputs was refused at the game's item conversion boundary.
     Stack(StackWriteError),
 }

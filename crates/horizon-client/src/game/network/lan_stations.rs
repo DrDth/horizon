@@ -208,8 +208,19 @@ impl Game<'_> {
 
     /// Runs `op` on the guest's open station (window `window`, any when
     /// None) with their inventory in it, then sends what changed. False when
-    /// no such window is open.
+    /// no such window is open. The station is out of the guest's menus while the mods are asked
+    /// (`anvil_update`, `anvil_craft_pre`...), so it is busy: a hook can't open another in its
+    /// place.
     fn lan_station_op(
+        &mut self,
+        conn: u32,
+        window: Option<i32>,
+        op: impl FnOnce(&mut Menu, &horizon_client::menu::Env),
+    ) -> bool {
+        self.with_station_busy(conn, |game| game.lan_station_op_busy(conn, window, op))
+    }
+
+    fn lan_station_op_busy(
         &mut self,
         conn: u32,
         window: Option<i32>,

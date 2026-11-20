@@ -39,6 +39,28 @@ fn block_pos(g: &Guest) -> [i32; 3] {
 }
 
 impl Game<'_> {
+    /// Runs `step` with guest `conn`'s station marked as asking the mods (`station_busy`): a
+    /// hook it asks can't open another station, which the step's write-back would drop with its
+    /// inputs. The mark is put back as it was after.
+    pub(in crate::game) fn with_station_busy<T>(
+        &mut self,
+        conn: u32,
+        step: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let was = self
+            .lan
+            .as_mut()
+            .and_then(|host| host.menus.get_mut(&conn))
+            .map(|menus| std::mem::replace(&mut menus.station_busy, true));
+        let out = step(self);
+        if let Some(was) = was
+            && let Some(menus) = self.lan.as_mut().and_then(|host| host.menus.get_mut(&conn))
+        {
+            menus.station_busy = was;
+        }
+        out
+    }
+
     /// Opens vanilla workstation menu `menu` for a connected player with no block, its input
     /// slots starting with `inputs`, kept open while their inventory holds one of `keep`.
     pub(super) fn player_open_station(
@@ -77,17 +99,17 @@ impl Game<'_> {
             .menus
             .entry(conn)
             .or_default();
-        if menus.opening_portable {
-            return Err(OpenStationError::Opening);
+        if menus.station_busy {
+            return Err(OpenStationError::Busy);
         }
-        menus.opening_portable = true;
+        menus.station_busy = true;
         let keep = keep.into_iter().map(|k| self.item_key_id(k)).collect();
         let window = match kind {
             Portable::Table => self.lan_open_crafting_with(conn, pos, inputs),
             Portable::Station(k) => self.lan_open_station_at(conn, k, pos, inputs).flatten(),
         };
         if let Some(menus) = self.lan.as_mut().and_then(|host| host.menus.get_mut(&conn)) {
-            menus.opening_portable = false;
+            menus.station_busy = false;
         }
         if let Some(window) = window
             && let Some(host) = self.lan.as_mut()

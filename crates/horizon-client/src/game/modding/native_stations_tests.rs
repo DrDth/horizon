@@ -7,7 +7,7 @@ use horizon_client::{
 };
 use horizon_protocol::{
     buf::Reader,
-    packets::play::{Clientbound as C, ContainerClose},
+    packets::play::{Clientbound as C, ContainerClick, ContainerClose, Serverbound},
 };
 use mod_api::{
     Hooks, PrepareItemCraftEvent, PrepareSmithingEvent, ServerHost, StationClosingEvent,
@@ -209,8 +209,9 @@ fn a_station_opened_with_inputs_is_prepared_and_a_leaving_player_asks_no_mod() {
 }
 
 /// A hook an open asks (`prepare_item_craft` on the restored grid) can't open another station
-/// for the same player: it would take the outer one's place and lose its inputs. Once the open
-/// is done, the next one works.
+/// for the same player: it would take the outer one's place and lose its inputs. Neither can one
+/// a click in the open table asks, while the table is out of the player's menus. Once the open
+/// or the click is done, the next open works.
 #[test]
 #[ignore = "daily"]
 fn a_station_opening_refuses_another_from_its_hooks() {
@@ -257,7 +258,7 @@ fn a_station_opening_refuses_another_from_its_hooks() {
             .unwrap();
         assert_eq!(
             *ANSWERS.lock().unwrap(),
-            [Err(mod_api::OpenStationError::Opening)]
+            [Err(mod_api::OpenStationError::Busy)]
         );
         let menus = game.lan.as_ref().unwrap().menus.get(&1).unwrap();
         let (w, _, table, _) = menus.crafting.table.as_ref().unwrap();
@@ -267,6 +268,33 @@ fn a_station_opening_refuses_another_from_its_hooks() {
             Some("minecraft:dirt"),
             "the outer table keeps its grid"
         );
+        ANSWERS.lock().unwrap().clear();
+        game.lan_guest_packet(
+            1,
+            Serverbound::ContainerClick(ContainerClick {
+                container: window,
+                state: 0,
+                slot: -999,
+                button: 0,
+                input: 0,
+                changed: Vec::new(),
+                carried: None,
+            }),
+        );
+        assert_eq!(
+            *ANSWERS.lock().unwrap(),
+            [Err(mod_api::OpenStationError::Busy)],
+            "a click asks the mods with the table busy"
+        );
+        let menus = game.lan.as_ref().unwrap().menus.get(&1).unwrap();
+        let (w, _, table, _) = menus.crafting.table.as_ref().unwrap();
+        assert_eq!(*w, window);
+        assert_eq!(
+            table.slot(1).map(|s| &*s.item),
+            Some("minecraft:dirt"),
+            "the clicked table keeps its grid"
+        );
+        assert!(!menus.station_busy, "the click puts the mark back");
         assert!(
             game.player_open_station(player, crafting, Vec::new(), vec![stick])
                 .unwrap()

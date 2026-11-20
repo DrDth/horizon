@@ -751,8 +751,9 @@ pub trait PlayersBackendMut {
     /// inputs go back to the inventory on closing, `station_closing` lets a mod keep them.
     /// The menu replaces the one the player had open, as `player_open_menu`'s does; a stock
     /// client shows it. The window id, or Ok(None) when a mod cancelled the open. Errors:
-    /// `NotStation`, `PlayerUnavailable`, `TooManyInputs`, or `Stack` for an input the game
-    /// refuses; a refused open leaves the old menu as it was.
+    /// `NotStation`, `PlayerUnavailable`, `TooManyInputs`, `Stack` for an input the game
+    /// refuses, or `Busy` from a hook the player's station asks while it opens or takes a click;
+    /// a refused open leaves the old menu as it was.
     #[access(WorldOnly)]
     fn player_open_station(
         &mut self,
