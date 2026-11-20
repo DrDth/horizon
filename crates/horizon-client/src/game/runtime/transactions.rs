@@ -27,6 +27,8 @@
 //! An entity added inside one goes at an abort, one removed is only marked until the root
 //! commit, and mods hear of joins and leaves at the root commit (`transactions/entities.rs`).
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
+use horizon_client::block_entity_anim::EndGateway;
+use horizon_client::fast_hash::FxHashMap;
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_mod_runtime::attachments::{Attachments, Holder};
 use mod_api::{Transaction, TransactionLifecycle, TransactionSeal};
@@ -183,12 +185,16 @@ struct Kept {
     name: Option<horizon_core::nbt::Tag>,
     /// The container lock and loot table roll kept beside the model.
     extras: BlockEntityExtras,
+    /// An end gateway's beam age and teleport cooldown, kept beside the model
+    /// (`BeAnims::gateway_servers`).
+    gateway: Option<EndGateway>,
 }
 
 impl Kept {
     fn capture(
         world: &horizon_client::world::World,
         hoppers: &HashMap<Pos, HopperState>,
+        gateways: &FxHashMap<[i32; 3], EndGateway>,
         pos: Pos,
     ) -> Self {
         Self {
@@ -198,6 +204,7 @@ impl Kept {
             hopper: hoppers.get(&pos).copied(),
             name: world.block_names.get(&pos).cloned(),
             extras: world.block_entity_extras(pos),
+            gateway: gateways.get(&[pos.0, pos.1, pos.2]).copied(),
         }
     }
 }
@@ -647,7 +654,9 @@ impl Game<'_> {
         level
             .block_entities
             .entry(pos)
-            .or_insert_with(|| Kept::capture(&self.world, &self.hoppers, pos));
+            .or_insert_with(|| {
+                Kept::capture(&self.world, &self.hoppers, &self.be_anims.gateway_servers, pos)
+            });
     }
     /// Puts back the block entity at `pos` that a transaction removed, as `kept` holds it, with
     /// its generation, where none stands there now.
@@ -1138,6 +1147,11 @@ impl Game<'_> {
             match kept.hopper {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
+            };
+            let at = [pos.0, pos.1, pos.2];
+            match kept.gateway {
+                Some(gateway) => self.be_anims.gateway_servers.insert(at, gateway),
+                None => self.be_anims.gateway_servers.remove(&at),
             };
         }
         // After the whole entities: a slot kept here was kept before any whole capture of its

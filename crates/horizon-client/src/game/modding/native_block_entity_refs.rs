@@ -775,7 +775,7 @@ mod tests {
     }
 
     /// `LevelRef::remove_block_entity`: the chest's block entity goes and its block stays; an
-    /// aborted transaction puts it back with its items.
+    /// aborted transaction puts it back with its items, and an end gateway's with its beam.
     #[test]
     #[ignore = "daily"]
     fn removing_a_block_entity_keeps_its_block() {
@@ -820,6 +820,32 @@ mod tests {
             assert_eq!(game.world.block(1, 64, 1), chest, "the block stays");
             assert!(!game.level_remove_block_entity(level, pos), "nothing left there");
             assert!(!game.level_remove_block_entity(level, [40, 64, 1]), "not loaded");
+
+            // An end gateway's beam goes with it, and an abort puts it back as it was.
+            let gateway = [3, 64, 3];
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:end_gateway")
+                .unwrap();
+            game.world.set(3, 64, 3, state).unwrap();
+            game.world
+                .block_entities
+                .insert((3, 64, 3), BlockEntity::EndGateway(Default::default()));
+            let beam = horizon_client::block_entity_anim::EndGateway {
+                age: 150,
+                teleport_cooldown: 7,
+            };
+            game.be_anims.gateway_servers.insert(gateway, beam);
+            let _: Result<(), ()> = game.transaction(|game, _| {
+                assert!(game.level_remove_block_entity(level, gateway));
+                assert!(!game.be_anims.gateway_servers.contains_key(&gateway));
+                Err(())
+            });
+            assert_eq!(game.be_anims.gateway_servers.get(&gateway), Some(&beam));
+            assert!(game.level_remove_block_entity(level, gateway));
+            assert!(!game.be_anims.gateway_servers.contains_key(&gateway));
         });
     }
 
