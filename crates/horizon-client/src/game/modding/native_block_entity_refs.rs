@@ -123,9 +123,10 @@ impl Game<'_> {
 
     /// `Level.removeBlockEntity` (`LevelChunk.removeBlockEntity`) in the level in place: the
     /// block entity at `pos` goes with what the level keeps beside it (a hopper's cooldown, its
-    /// name, the tag it was loaded with, an end gateway's beam), and its block stays. No drops
-    /// and no neighbour updates. An open transaction puts it back on abort. False off the level
-    /// in place, for a position that isn't loaded, and without a block entity there.
+    /// name, the tag it was loaded with, an end gateway's beam), and its block stays. What it
+    /// stores is gone for good once committed: no drops and no neighbour updates. An open
+    /// transaction puts it back on abort. False off the level in place, for a position that
+    /// isn't loaded, and without a block entity there.
     pub(super) fn level_remove_block_entity(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
