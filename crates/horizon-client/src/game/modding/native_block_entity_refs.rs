@@ -968,9 +968,35 @@ mod tests {
             assert!(game.world.block_entities.get(&(1, 64, 1)).is_none());
             assert!(!game.world.block_names.contains_key(&(1, 64, 1)));
             game.world.set(1, 64, 1, chest).unwrap();
+            let mut items = vec![None; 27];
+            items[0] = Some(horizon_items::items::ItemStack::new("minecraft:diamond", 3));
             game.world
                 .block_entities
-                .insert((1, 64, 1), BlockEntity::Chest(vec![None; 27]));
+                .insert((1, 64, 1), BlockEntity::Chest(items));
+            game.world
+                .block_names
+                .insert((1, 64, 1), Tag::String("Loot".into()));
+
+            // Stone and then a chest again: the new chest stays as it was placed, empty and
+            // unnamed, under its own identity.
+            let generation = game.world.block_entities.generation(&(1, 64, 1));
+            let _: Result<(), ()> = game.transaction(|game, _| {
+                assert!(game.level_remove_block_entity(level, pos));
+                for state in [stone, chest] {
+                    assert_eq!(
+                        game.level_set_block(level, pos, state, mod_api::BlockUpdateFlags::NONE),
+                        Ok(true)
+                    );
+                }
+                Err(())
+            });
+            assert_eq!(game.world.block(1, 64, 1), chest);
+            assert_ne!(game.world.block_entities.generation(&(1, 64, 1)), generation);
+            assert!(matches!(
+                game.world.block_entities.get(&(1, 64, 1)),
+                Some(BlockEntity::Chest(items)) if items.iter().all(Option::is_none)
+            ));
+            assert!(!game.world.block_names.contains_key(&(1, 64, 1)));
             game.world
                 .block_names
                 .insert((1, 64, 1), Tag::String("Loot".into()));

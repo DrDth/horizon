@@ -112,6 +112,11 @@ pub struct BlockEntities {
     /// The token of each position's pending entry: an entry whose token is
     /// not here any more was cancelled.
     pending: FxHashMap<Pos, u32>,
+    /// The live slots `cancel` freed, still in `tickers` until the next sweep: a removal an
+    /// aborted transaction puts back takes its slot again from here.
+    released: FxHashMap<Pos, u32>,
+    /// The pending tokens `cancel` withdrew, still in `added` until the next promotion.
+    withdrawn: FxHashMap<Pos, u32>,
     next_slot: u32,
     /// Whether a slot was freed since the list was last swept: otherwise
     /// every slot in it is still live, unless its block entity is `out`.
@@ -526,8 +531,13 @@ impl BlockEntities {
     /// `removeBlockEntityTicker`: no slot, made or pending.
     fn cancel(&mut self, pos: &Pos) {
         self.asleep.remove(pos);
-        self.freed |= self.live.remove(pos).is_some();
-        self.pending.remove(pos);
+        if let Some(slot) = self.live.remove(pos) {
+            self.freed = true;
+            self.released.insert(*pos, slot);
+        }
+        if let Some(token) = self.pending.remove(pos) {
+            self.withdrawn.insert(*pos, token);
+        }
     }
 
     /// Attachment map for a live block entity.
@@ -961,10 +971,12 @@ impl BlockEntities {
         self.generations.insert(pos, generation);
         match ticker {
             TickerRegistration::None => {}
-            TickerRegistration::Live(slot) if self.tickers.contains(&(pos, slot)) => {
+            TickerRegistration::Live(slot) if self.released.get(&pos) == Some(&slot) => {
+                self.released.remove(&pos);
                 self.live.insert(pos, slot);
             }
-            TickerRegistration::Pending(token) if self.added.contains(&(pos, token)) => {
+            TickerRegistration::Pending(token) if self.withdrawn.get(&pos) == Some(&token) => {
+                self.withdrawn.remove(&pos);
                 self.pending.insert(pos, token);
             }
             _ => self.add(pos),
@@ -1159,6 +1171,8 @@ impl BlockEntities {
         self.live.clear();
         self.added.clear();
         self.pending.clear();
+        self.released.clear();
+        self.withdrawn.clear();
         self.out.clear();
         self.replaced.clear();
         self.carried.clear();
@@ -1228,6 +1242,8 @@ impl BlockEntities {
     /// Returns the slots to tick, in order; check each with `is_live` before
     /// ticking it, as the ticks before it can free it.
     pub fn tickers(&mut self, state: impl Fn(Pos) -> u32) -> Arc<Vec<(Pos, u32)>> {
+        // Every entry `added` held leaves it now, the withdrawn ones with it.
+        self.withdrawn.clear();
         for (pos, token) in std::mem::take(&mut self.added) {
             if self.pending.get(&pos) != Some(&token) {
                 continue;
@@ -1261,6 +1277,8 @@ impl BlockEntities {
             }
             mine && map.contains_key(p)
         });
+        // The freed slots left the list with the sweep.
+        self.released.clear();
         Arc::clone(&self.tickers)
     }
     /// The ticker list as it stands, without promoting pending slots.
@@ -1332,13 +1350,26 @@ mod tests {
             "the same slots, in order"
         );
 
+        // One still pending gets its pending entry back, not a second one.
+        let fresh = (3, 64, 1);
+        b.insert(fresh, hopper());
+        let generation = b.generation(&fresh).unwrap();
+        let ticker = b.ticker_registration(&fresh);
+        assert!(matches!(ticker, TickerRegistration::Pending(_)));
+        let entity = b.remove(&fresh).unwrap();
+        b.restore_removed(fresh, entity, generation, ticker);
+        assert_eq!(b.ticker_registration(&fresh), ticker);
+        assert_eq!(b.added.len(), 1);
+        let states: HashMap<Pos, u32> = [(ticking, 1), (modded, 1), (fresh, 1)].into();
+        assert_eq!(order(&mut b, &states), vec![ticking, modded, fresh]);
+
         // Once its slot is swept, a restored block entity gets a new one at the end.
         let generation = b.generation(&ticking).unwrap();
         let ticker = b.ticker_registration(&ticking);
         let entity = b.remove(&ticking).unwrap();
-        assert_eq!(order(&mut b, &states), vec![modded]);
+        assert_eq!(order(&mut b, &states), vec![modded, fresh]);
         b.restore_removed(ticking, entity, generation, ticker);
-        assert_eq!(order(&mut b, &states), vec![modded, ticking]);
+        assert_eq!(order(&mut b, &states), vec![modded, fresh, ticking]);
     }
 
     #[test]

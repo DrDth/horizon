@@ -103,6 +103,9 @@ pub(super) struct Level {
     /// The block entities this transaction removed (`journal_remove_block_entity`): an abort
     /// puts them back as `block_entities` keeps them.
     removed_block_entities: std::collections::HashSet<Pos>,
+    /// The positions a block write this transaction doesn't keep changed (`LevelRef::set_block`
+    /// stores at once): an abort leaves the block and a block entity that write made there.
+    unjournaled_blocks: std::collections::HashSet<Pos>,
     /// Each item slot (block entity, slot) a slot-only write changed, as it was before this
     /// transaction first wrote it, for a block entity not kept whole in `block_entities`: a
     /// move through a container keeps the slot it touches, not the entity's whole saved data.
@@ -499,6 +502,7 @@ impl Game<'_> {
                 outer
                     .removed_block_entities
                     .extend(level.removed_block_entities);
+                outer.unjournaled_blocks.extend(level.unjournaled_blocks);
                 for (pos, state) in level.blocks {
                     outer.blocks.entry(pos).or_insert(state);
                 }
@@ -688,6 +692,12 @@ impl Game<'_> {
                 (registry.state(a), registry.state(b)),
                 (Some(a), Some(b)) if a.name == b.name
             )
+    }
+    /// Notes that a block write the open transaction doesn't keep changed the block at `pos`.
+    pub(in crate::game) fn note_unjournaled_block(&mut self, pos: [i32; 3]) {
+        if let Some(level) = self.transactions.last_mut() {
+            level.unjournaled_blocks.insert((pos[0], pos[1], pos[2]));
+        }
     }
     /// Removes the block entity at `pos`, kept whole by the open transaction, which puts it back
     /// if it aborts: a block write in the transaction that drops it, so later reads in it see
@@ -1145,6 +1155,13 @@ impl Game<'_> {
                 None => self.world.block(pos.0, pos.1, pos.2),
             };
             if kept.entity.is_some() && !self.same_block(kept.block, block) {
+                continue;
+            }
+            // Another block entity than the kept one, where such a write changed the block (stone,
+            // then a chest again), is that write's: it and its own side data stay.
+            if level.unjournaled_blocks.contains(&pos)
+                && self.world.block_entities.generation(&pos) != kept.generation
+            {
                 continue;
             }
             match (&kept.entity, self.world.block_entities.get_mut(&pos)) {
