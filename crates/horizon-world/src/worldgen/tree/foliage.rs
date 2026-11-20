@@ -771,10 +771,13 @@ impl<W: FeatureWorld + PlacementContext, R: RandomSource> FoliageRandom
     for ModCanopy<'_, '_, W, R>
 {
     fn int(&mut self, bound: i32) -> i32 {
-        self.run.random.next_int_bound(bound).unwrap_or_else(|invalid| {
-            self.invalid.get_or_insert(invalid);
-            0
-        })
+        self.run
+            .random
+            .next_int_bound(bound)
+            .unwrap_or_else(|invalid| {
+                self.invalid.get_or_insert(invalid);
+                0
+            })
     }
     fn long(&mut self) -> i64 {
         self.run.random.next_long()
