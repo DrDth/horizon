@@ -25,6 +25,9 @@ pub(in crate::game) struct GuestMenus {
     /// The crafting table or workstation a mod opened with no block
     /// (game/modding/native_stations.rs); None for every other menu.
     pub(in crate::game) portable: Option<super::native_stations::PortableStation>,
+    /// A mod's open of a workstation with no block is running for the guest: the hooks it asks
+    /// (`prepare_item_craft`...) can't open another, which would take this one's place.
+    pub(in crate::game) opening_portable: bool,
 }
 
 impl LanHost {

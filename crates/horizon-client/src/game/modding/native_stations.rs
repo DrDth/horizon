@@ -67,11 +67,28 @@ impl Game<'_> {
             .and_then(|host| host.hub.guest(conn))
             .map(block_pos)
             .ok_or(OpenStationError::PlayerUnavailable)?;
+        // An open asks the mods (the restored grid's `prepare_item_craft`...), and one of them
+        // opening another station for the player would replace this one and lose its inputs:
+        // refused before any window is sent or input taken.
+        let menus = self
+            .lan
+            .as_mut()
+            .ok_or(OpenStationError::PlayerUnavailable)?
+            .menus
+            .entry(conn)
+            .or_default();
+        if menus.opening_portable {
+            return Err(OpenStationError::Opening);
+        }
+        menus.opening_portable = true;
         let keep = keep.into_iter().map(|k| self.item_key_id(k)).collect();
         let window = match kind {
             Portable::Table => self.lan_open_crafting_with(conn, pos, inputs),
             Portable::Station(k) => self.lan_open_station_at(conn, k, pos, inputs).flatten(),
         };
+        if let Some(menus) = self.lan.as_mut().and_then(|host| host.menus.get_mut(&conn)) {
+            menus.opening_portable = false;
+        }
         if let Some(window) = window
             && let Some(host) = self.lan.as_mut()
         {

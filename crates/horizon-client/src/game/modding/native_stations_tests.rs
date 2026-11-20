@@ -207,3 +207,71 @@ fn a_station_opened_with_inputs_is_prepared_and_a_leaving_player_asks_no_mod() {
         assert_eq!(dirt, 2, "both inputs went back");
     });
 }
+
+/// A hook an open asks (`prepare_item_craft` on the restored grid) can't open another station
+/// for the same player: it would take the outer one's place and lose its inputs. Once the open
+/// is done, the next one works.
+#[test]
+#[ignore = "daily"]
+fn a_station_opening_refuses_another_from_its_hooks() {
+    const CASE: &str = "HORIZON_PORTABLE_REENTRY_CHILD";
+    if run_fresh_cases(
+        "game::native_stations_tests::a_station_opening_refuses_another_from_its_hooks",
+        CASE,
+        &["reenter"],
+    ) {
+        return;
+    }
+    type Answer = Result<Option<i32>, mod_api::OpenStationError>;
+    static ANSWERS: Mutex<Vec<Answer>> = Mutex::new(Vec::new());
+    struct Reenter;
+    #[mod_api::__subscriptions]
+    impl Hooks for Reenter {
+        fn prepare_item_craft(
+            &self,
+            host: &mut dyn ServerHost,
+            _: &mut PrepareItemCraftEvent<'_>,
+        ) -> Option<mod_api::ItemStack> {
+            let player = host.player(123)?;
+            let stone =
+                mod_api::ItemStack::new(mod_api::__private::item_key("minecraft:stone")?, 1);
+            let stick = mod_api::__private::item_key("minecraft:stick")?;
+            let crafting = menu_key("minecraft:crafting");
+            let answer = player.open_station(host, crafting, vec![stone], vec![stick]);
+            ANSWERS.lock().unwrap().push(answer);
+            None
+        }
+    }
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("reenter", Box::new(Reenter))].into();
+    mod_platform::__private::install(mods.clone());
+    crate::game::api_values::install_parts(&mods).unwrap();
+    with_game(|game| {
+        let _rx = stick_guest(game);
+        let player = game.player(123).unwrap();
+        let stick = mod_api::__private::item_key("minecraft:stick").unwrap();
+        let crafting = menu_key("minecraft:crafting");
+        let dirt = Some(ItemStack::new("minecraft:dirt", 1));
+        let window = game
+            .player_open_station(player, crafting, vec![dirt], vec![stick])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            *ANSWERS.lock().unwrap(),
+            [Err(mod_api::OpenStationError::Opening)]
+        );
+        let menus = game.lan.as_ref().unwrap().menus.get(&1).unwrap();
+        let (w, _, table, _) = menus.crafting.table.as_ref().unwrap();
+        assert_eq!(*w, window);
+        assert_eq!(
+            table.slot(1).map(|s| &*s.item),
+            Some("minecraft:dirt"),
+            "the outer table keeps its grid"
+        );
+        assert!(
+            game.player_open_station(player, crafting, Vec::new(), vec![stick])
+                .unwrap()
+                .is_some(),
+            "the next open works"
+        );
+    });
+}
