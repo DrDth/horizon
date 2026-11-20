@@ -8,8 +8,8 @@ use horizon_world::worldgen::mod_foliage_placers::{
     ModFoliagePlacerTypes, install_mod_foliage_placer_types,
 };
 use mod_api::{
-    BlockMetadata, BlockState, FoliageAttachment, FoliageContext, FoliagePlacer,
-    FoliagePlacerType, StructureRandom,
+    BlockMetadata, BlockState, FoliageAttachment, FoliageContext, FoliagePlacer, FoliagePlacerType,
+    StructureRandom,
 };
 use std::sync::Arc;
 
@@ -75,7 +75,9 @@ impl FoliageContext for Canopy<'_> {
     fn set(&mut self, pos: [i32; 3], state: BlockState) {
         match self.worker.index.to_engine(state) {
             Ok(state) => self.inner.set(pos, state),
-            Err(_) => log::warn!("Horizon: a mod foliage placer set a block state the server lacks"),
+            Err(_) => {
+                log::warn!("Horizon: a mod foliage placer set a block state the server lacks")
+            }
         }
     }
     fn is_set(&mut self, pos: [i32; 3]) -> bool {
@@ -138,7 +140,12 @@ impl ModFoliagePlacer for PlacerAdapter {
 fn installed_foliage_placer_types() -> ModFoliagePlacerTypes {
     mod_api::__private::foliage_placer_type_declarations()
         .into_iter()
-        .map(|(id, ty)| (id, Arc::new(TypeAdapter(ty)) as Arc<dyn ModFoliagePlacerType>))
+        .map(|(id, ty)| {
+            (
+                id,
+                Arc::new(TypeAdapter(ty)) as Arc<dyn ModFoliagePlacerType>,
+            )
+        })
         .collect()
 }
 
