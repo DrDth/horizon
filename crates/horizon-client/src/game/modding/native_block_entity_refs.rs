@@ -60,6 +60,27 @@ impl Game<'_> {
         ))
     }
 
+    /// `Level.removeBlockEntity` (`LevelChunk.removeBlockEntity`) in the level in place: the
+    /// block entity at `pos` goes with what the level keeps beside it (a hopper's cooldown, its
+    /// name, the tag it was loaded with, an end gateway's beam), and its block stays. No drops
+    /// and no neighbour updates. An open transaction puts it back on abort. False off the level
+    /// in place, for a position that isn't loaded, and without a block entity there.
+    pub(super) fn level_remove_block_entity(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
+            return false;
+        }
+        if loaded_block_entity(&self.world, pos).is_none() {
+            return false;
+        }
+        let key = (pos[0], pos[1], pos[2]);
+        self.journal_remove_block_entity(key);
+        self.hoppers.remove(&key);
+        self.world.block_names.remove(&key);
+        self.world.forget_block_entity_source(key);
+        self.be_anims.gateway_servers.remove(&pos);
+        true
+    }
+
     /// The data of the block entity at `pos`, as saved without identity or position
     /// metadata, for the hook that hears its block's removal: the entity is gone from
     /// the world by then, so it is read first. None for a block without one, or while
@@ -750,6 +771,55 @@ mod tests {
                 replacement.set_data_slots(game, vec![99]),
                 Err(BlockEntityDataError::Stale)
             );
+        });
+    }
+
+    /// `LevelRef::remove_block_entity`: the chest's block entity goes and its block stays; an
+    /// aborted transaction puts it back with its items.
+    #[test]
+    #[ignore = "daily"]
+    fn removing_a_block_entity_keeps_its_block() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level("minecraft:overworld").unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            let pos = [1, 64, 1];
+            game.world.set(1, 64, 1, chest).unwrap();
+            let mut items = vec![None; 27];
+            items[0] = Some(horizon_items::items::ItemStack::new("minecraft:diamond", 3));
+            game.world
+                .block_entities
+                .insert((1, 64, 1), BlockEntity::Chest(items));
+            game.world
+                .block_names
+                .insert((1, 64, 1), Tag::String("Loot".into()));
+
+            let _: Result<(), ()> = game.transaction(|game, _| {
+                assert!(game.level_remove_block_entity(level, pos));
+                assert!(game.block_entity(level, pos).is_none());
+                Err(())
+            });
+            assert!(game.block_entity(level, pos).is_some(), "the abort puts it back");
+            assert!(matches!(
+                game.world.block_entities.get(&(1, 64, 1)),
+                Some(BlockEntity::Chest(items)) if items[0].as_ref().is_some_and(|s| s.count == 3)
+            ));
+
+            assert!(game.level_remove_block_entity(level, pos));
+            assert!(game.block_entity(level, pos).is_none());
+            assert!(!game.world.block_names.contains_key(&(1, 64, 1)));
+            assert_eq!(game.world.block(1, 64, 1), chest, "the block stays");
+            assert!(!game.level_remove_block_entity(level, pos), "nothing left there");
+            assert!(!game.level_remove_block_entity(level, [40, 64, 1]), "not loaded");
         });
     }
 
